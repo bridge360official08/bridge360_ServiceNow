@@ -1,0 +1,11 @@
+{
+    "scope": "global",
+    "scopeId": "09159ba347aa8310b519b4b4116d43b9",
+    "name": "Bridge360",
+    "licensing": {
+        "enforceLicense": "none"
+    },
+    "jsLevel": "helsinki_es5",
+    "description": "AI-Powered Document-Assisted Registration System",
+    "packageResolverVersion": "2.0.0"
+}

@@ -1,0 +1,35 @@
+{
+    "name": "bridge360",
+    "version": "1.0.0",
+    "description": "Bridge360 — ServiceNow Refugee Family Case Management System",
+    "license": "UNLICENSED",
+    "imports": {
+        "#now:*": "./@types/servicenow/fluent/*/index.js"
+    },
+    "scripts": {
+        "dev": "vite",
+        "build": "vite build",
+        "preview": "vite preview",
+        "sdk:build": "npx @servicenow/sdk build",
+        "sdk:deploy": "npx @servicenow/sdk install",
+        "sdk:sync": "node scripts/sync-backend.mjs",
+        "sdk:transform": "npx @servicenow/sdk transform",
+        "sdk:types": "npx @servicenow/sdk dependencies"
+    },
+    "devDependencies": {
+        "@servicenow/glide": "^27.0.5",
+        "@servicenow/sdk": "^4.10.1",
+        "@types/react": "^19.0.0",
+        "@types/react-dom": "^19.0.0",
+        "@vitejs/plugin-react": "^4.3.4",
+        "typescript": "^5.6.3",
+        "vite": "^5.4.11"
+    },
+    "dependencies": {
+        "@google/generative-ai": "^0.24.1",
+        "libphonenumber-js": "^1.13.10",
+        "lucide-react": "^0.469.0",
+        "react": "^19.0.0",
+        "react-dom": "^19.0.0"
+    }
+}
