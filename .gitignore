@@ -1,9 +1,48 @@
-.DS_Store
-.now/
-dist/
+# Dependencies
 node_modules/
+package-lock.json
+
+# Production builds & caches
+dist/
+dist-ssr/
+*.local
 target/
+.now/
 *.tsbuildinfo
 .jest_cache
+
+# Environment & secrets
 .env
+.env.*
+!.env.example
+
+# Python caches & virtual environments
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+ENV/
+*.pickle
+services/easyocr-service/EasyOCR/
+
+# ML Model weights & checkpoints (downloaded at runtime)
+*.pth
+*.pt
+*.onnx
+
+# Temporary scratch & logs
 scratch/
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# OS & Editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

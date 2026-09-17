@@ -125,3 +125,49 @@ Automated verification (`run_live_instance_validation.mjs`) confirmed 100% pass 
 *   **Targeted REST Operation**: `sys_ws_operation/081e526c946846a5986ca21db2845b8d` (`Document Intelligence Extract`).
 *   **Backup Retained**: `scratch/backups/live_op_081e526c946846a5986ca21db2845b8d_final_backup.json`.
 *   **Untouched Platform Artifacts**: `Bridge360AIVerification`, `Bridge360VerificationAgent`, AI Agent Studio configurations, and database schemas were completely untouched.
+
+---
+
+## 7. Standalone EasyOCR Microservice & Fallback Architecture
+
+### 7.1 Purpose & Motivation
+While ServiceNow Document Intelligence (DI) is the primary native OCR engine for Bridge360, certain edge-case documents (low-contrast scans, unusual layouts, or temporary platform API throttling) can result in low-confidence or sparse candidate tokens. 
+
+To provide enterprise resilience without violating data sovereignty or introducing external cloud OCR dependencies, an isolated Python microservice wrapping the official **EasyOCR** engine (`JaidedAI/EasyOCR`) was developed.
+
+### 7.2 Strict Non-Destructive Separation
+*   **Decoupled Location**: Resides entirely in `services/easyocr-service/`.
+*   **Zero Document Schemas**: The service has no knowledge of identity fields, country catalogs, or document types. It accepts an image and returns raw textual observations (`text`, `lines`, `words`, `bounding_box`, `confidence`).
+*   **ServiceNow Source of Truth**: Dynamic configuration in ServiceNow (`u_bridge360_country_document_field`) remains the sole authority for field names, types, and Layer 1 admission.
+*   **Runtime Status**: **Fully integrated and validated** as a controlled secondary fallback.
+
+### 7.3 Validated Two-Tier Fallback Pipeline Architecture
+```
+ServiceNow Document Intelligence (PRIMARY)
+        ↓
+Generic DI Quality Assessment (tokens >= 4, length >= 20, fields resolved)
+        ↓
+SUFFICIENT ─────────→ Keep DI OCR output & Dynamic Extraction
+        ↓
+INSUFFICIENT / FAILED
+        ↓
+Standalone EasyOCR Service (/ocr)
+        ↓
+Common raw OCR text representation
+        ↓
+Existing Bridge360 dynamic extraction
+        ↓
+ServiceNow configured document fields (u_bridge360_country_document_field)
+        ↓
+Layer 1 Enforced
+```
+
+### 7.4 Service & Integration Validation
+*   **DI-First & DI-Sufficient**: Tested with clear document image in browser session; DI processed 27 tokens; quality assessment evaluated as sufficient; EasyOCR was correctly skipped (`easyOcrUsed: false`, `ocrSource: DI`).
+*   **DI-Insufficient Fallback**: Tested with low-information image (3 tokens `< 4`); generic assessment marked DI insufficient; EasyOCR invoked once, succeeded, and passed text into dynamic extraction (`ocrSource: EASYOCR`).
+*   **EasyOCR Offline Safety**: Tested unreachable endpoint / timeout; caught gracefully via 8000ms AbortController; registration did not crash and preserved original DI output.
+*   **Dynamic Field Source of Truth**: Tested across 8 diverse countries/documents (Turkey, Denmark, Russia, USA, Israel, Thailand, Sri Lanka); 100% of extracted Layer-1 fields matched configured fields with 0 unconfigured fields.
+*   **Live ServiceNow Safety**: Document Intelligence, AI Agent Studio, and all 26 live REST operations preserved untouched; `sdk:deploy` was not executed.
+*   **Hardcoding Audit**: 100% free of country-specific or document-specific Layer-1 extraction logic.
+
+

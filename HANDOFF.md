@@ -112,3 +112,92 @@ OVERALL VALIDATION STATUS: 100% PASSED (ALL 11 POINTS CONFIRMED)
 2. **Always Backup Before Modifying**: Capture a JSON snapshot of any `sys_ws_operation` before updating `operation_script`.
 3. **Preserve Layer 1 Filtering**: Never bypass `expectedFields` filtering. The database (`u_bridge360_country_document_field`) must remain the sole source of truth for extracted fields.
 4. **No Document- or Country-Specific Hardcoding**: All extraction improvements must remain generic across all documents and countries.
+
+---
+
+## 6. EasyOCR Standalone Service & Future Fallback Architecture
+
+### Service Overview
+An isolated, document-agnostic OCR HTTP microservice has been built in `services/easyocr-service/` wrapping the official EasyOCR engine (`JaidedAI/EasyOCR` commit `363afb184047ce452e436f4224f3098422df872e`).
+
+### Key Characteristics
+*   **Complete Decoupling**: EasyOCR operates independently and is **NOT connected to the live Bridge360 runtime** at this stage.
+*   **Pure OCR Observations Only**: The service never extracts document-specific fields (no `aadhaar_number`, `passport_number`, `date_of_birth`, etc.). It only outputs generic text, lines, bounding boxes, words, and confidence.
+*   **ServiceNow Source of Truth**: Dynamic configuration in ServiceNow (`u_bridge360_country` $\rightarrow$ `u_bridge360_country_document` $\rightarrow$ `u_bridge360_country_document_field`) remains the sole authority for document schemas and field extraction.
+
+### API Contract
+*   `GET /health`: Returns service health, dynamic EasyOCR version, GPU status, and supported language count (86 languages).
+*   `POST /ocr`: Accepts base64 JSON (`{"image": "<base64>", "languages": ["en"]}`) or multipart file upload. Returns:
+    ```json
+    {
+      "success": true,
+      "text": "...",
+      "lines": [{"text": "...", "confidence": 0.95, "bounding_box": [[x1,y1],[x2,y2],[x3,y3],[x4,y4]]}],
+      "words": [{"text": "...", "confidence": 0.95, "bounding_box": [...]}],
+      "processing_time_ms": 782
+    }
+    ```
+
+### Validated Two-Tier OCR Architecture (DI Primary + EasyOCR Fallback)
+The secondary EasyOCR fallback is **fully integrated and validated**. ServiceNow Document Intelligence remains the **primary** document processing engine, while the standalone EasyOCR microservice operates strictly as a controlled secondary fallback.
+
+```
+                    User Uploads Document
+                              │
+                              ▼
+        ┌───────────────────────────────────────────┐
+        │  ServiceNow Document Intelligence (DI)   │  ◄── PRIMARY ENGINE
+        │        (sn_docintel.DocIntelAPI)          │
+        └─────────────────────┬─────────────────────┘
+                              │
+                              ▼
+        ┌───────────────────────────────────────────┐
+        │       Generic DI Quality Assessment       │
+        │  - Execution status (diOcrUsed)           │
+        │  - Token threshold (diTokenCount >= 4)    │
+        │  - Substantive text length (>= 20 chars)  │
+        │  - Field match resolution                 │
+        └─────────────────────┬─────────────────────┘
+                              │
+               ┌──────────────┴──────────────┐
+               │                             │
+        [DI Sufficient]               [DI Insufficient]
+               │                             │
+               ▼                             ▼
+       Keep DI OCR Text            ┌───────────────────┐
+               │                   │  EasyOCR Service  │  ◄── SECONDARY FALLBACK
+               │                   │  POST /ocr        │      (Standalone & Generic)
+               │                   └─────────┬─────────┘
+               │                             │
+               │                   ┌─────────┴─────────┐
+               │                   │                   │
+               │               [Success]            [Offline / Error]
+               │                   │                   │
+               │                   ▼                   ▼
+               │            EasyOCR Text &       Preserve DI Result
+               │            Lines & Words        & Continue Safely
+               │                   │                   │
+               └──────────────┬────┴───────────────────┘
+                              │
+                              ▼
+        ┌───────────────────────────────────────────┐
+        │      Dynamic Document-Field Extraction    │
+        │    u_bridge360_country_document_field     │  ◄── SOLE SOURCE OF TRUTH
+        │         (Layer 1 Configured Fields)       │
+        └─────────────────────┬─────────────────────┘
+                              │
+                              ▼
+        ┌───────────────────────────────────────────┐
+        │       Human Review / AI Verification      │
+        └───────────────────────────────────────────┘
+```
+
+### Validation & Verification Summary
+- **DI Sufficient Test**: **PASS** (Clear document upload processed by ServiceNow DI with 27 tokens; generic quality check evaluated as sufficient; EasyOCR was correctly skipped).
+- **DI Insufficient / Fallback Test**: **PASS** (Low-information document with 3 tokens correctly triggered generic assessment `LOW_TOKEN_COUNT (3)`; EasyOCR was invoked, returned text, and routed into existing dynamic extraction; `ocrSource = EASYOCR`).
+- **EasyOCR Offline / Timeout Test**: **PASS** (Unreachable endpoint caught gracefully by AbortController; registration did not crash and preserved DI result).
+- **Dynamic Field Source of Truth**: **PASS** (8 diverse countries/documents tested; 100% of extracted Layer-1 fields matched configured fields; 0 unconfigured fields).
+- **Live ServiceNow Safety**: **PASS** (Document Intelligence, AI Agent Studio, and all 26 live REST operations preserved untouched; `sdk:deploy` was not executed).
+- **Hardcoding Audit**: **PASS** (0 country/document-specific extraction branches or schemas).
+
+

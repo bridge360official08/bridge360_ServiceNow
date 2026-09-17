@@ -35,6 +35,15 @@ Bridge360 combines ServiceNow platform capabilities with modern client-side perf
 
 ```
 bridge360/
+├── services/                        # Standalone Microservices
+│   └── easyocr-service/             # Standalone Python EasyOCR HTTP Microservice
+│       ├── EasyOCR/                 # Official EasyOCR engine clone
+│       ├── app.py                   # FastAPI application (/health, /ocr)
+│       ├── config.py                # Environment configuration
+│       ├── test_service.py          # Automated test suite (7 tests)
+│       ├── Dockerfile               # Container definition
+│       ├── docker-compose.yml       # Docker compose specification
+│       └── README.md                # Standalone service documentation
 ├── src/
 │   ├── client/                      # Frontend Application (React 18 + TS)
 │   │   ├── assets/                  # High-res static images and vectors
@@ -63,32 +72,67 @@ bridge360/
 
 ## 🚀 Key System Workflows
 
-### 1. Document Intake & Generic Extraction Pipeline
-The document intake flow is strictly configuration-driven and enforces Layer 1 data integrity:
+### 1. Document Intake & Two-Tier OCR Architecture
+ServiceNow Document Intelligence serves as the **primary document processing engine**. The standalone EasyOCR microservice (`services/easyocr-service/`) operates strictly as a controlled **secondary fallback** when Document Intelligence output is insufficient or unavailable.
 
 ```
-User selects Country & Document Type (SearchableSelect)
-          ↓
-Dynamic fields queried from u_bridge360_country_document_field (expectedFields)
-          ↓
-Document image uploaded to POST /api/global/v1/extract-document
-          ↓
-ServiceNow Document Intelligence creates & executes sys_di_task
-          ↓
-Native DI OCR candidate tokens parsed from sys_di_image.candidates
-          ↓
-Bridge360 Generic Matching Layer:
-  - Unicode NFD diacritic decomposition (accents stripped generically)
-  - Elision apostrophe stripping (e.g. "Date d'expiration" matches "date dexpiration")
-  - Strict word-boundary checks (prevents substring collisions like "sex" in "sexe: F")
-  - Space vs. underscore role normalization ("head_of_family_name" → "head of family")
-  - Constituent name combination (Nom + Prénoms → full_name)
-  - Horizontal single-line whitespace regex ([ \t]+)
-          ↓
-Layer 1 Filter: ONLY configured fields accepted into output
-          ↓
-Auto-filled into Step 2 form with ISO YYYY-MM-DD date normalization
+                    User Uploads Document
+                              │
+                              ▼
+        ┌───────────────────────────────────────────┐
+        │  ServiceNow Document Intelligence (DI)   │  ◄── PRIMARY ENGINE
+        │        (sn_docintel.DocIntelAPI)          │
+        └─────────────────────┬─────────────────────┘
+                              │
+                              ▼
+        ┌───────────────────────────────────────────┐
+        │       Generic DI Quality Assessment       │
+        │  - Execution status (diOcrUsed)           │
+        │  - Token threshold (diTokenCount >= 4)    │
+        │  - Substantive text length (>= 20 chars)  │
+        │  - Field match resolution                 │
+        └─────────────────────┬─────────────────────┘
+                              │
+               ┌──────────────┴──────────────┐
+               │                             │
+        [DI Sufficient]               [DI Insufficient]
+               │                             │
+               ▼                             ▼
+       Keep DI OCR Text            ┌───────────────────┐
+               │                   │  EasyOCR Service  │  ◄── SECONDARY FALLBACK
+               │                   │  POST /ocr        │      (Standalone & Generic)
+               │                   └─────────┬─────────┘
+               │                             │
+               │                   ┌─────────┴─────────┐
+               │                   │                   │
+               │               [Success]            [Offline / Error]
+               │                   │                   │
+               │                   ▼                   ▼
+               │            EasyOCR Text &       Preserve DI Result
+               │            Lines & Words        & Continue Safely
+               │                   │                   │
+               └──────────────┬────┴───────────────────┘
+                              │
+                              ▼
+        ┌───────────────────────────────────────────┐
+        │      Dynamic Document-Field Extraction    │
+        │    u_bridge360_country_document_field     │  ◄── SOLE SOURCE OF TRUTH
+        │         (Layer 1 Configured Fields)       │
+        └─────────────────────┬─────────────────────┘
+                              │
+                              ▼
+        ┌───────────────────────────────────────────┐
+        │       Human Review / AI Verification      │
+        └───────────────────────────────────────────┘
 ```
+
+**Key Architectural Guarantees:**
+- **DI Remains Primary**: EasyOCR is never called when DI produces sufficient OCR output.
+- **Controlled Single Path**: Browser client evaluates DI quality and triggers secondary fallback via local proxy.
+- **Document-Agnostic**: EasyOCR receives image data, generic options (`preprocess`, `mag_ratio`), and dynamic country languages where available. No hardcoded country/document schemas exist in EasyOCR.
+- **Fail-Safe Operation**: If EasyOCR times out (8000ms threshold) or is offline, Bridge360 degrades gracefully to preserve the original DI result without breaking registration.
+- **Layer 1 Single Source of Truth**: All OCR output (DI or EasyOCR) flows through the same dynamic field extraction matching against `u_bridge360_country_document_field`.
+
 
 ### 2. Multi-Agent AI Verification Suite
 In the case worker workspace (`VerificationView`), case officers can trigger the 4-agent verification pipeline:
@@ -121,6 +165,26 @@ VITE_GEMINI_API_KEY=AIzaSyYourValidGoogleGeminiAPIKey
 npm run dev
 ```
 The application will launch on `http://localhost:3000`.
+
+---
+
+## 🔍 Standalone EasyOCR Microservice (Services Directory)
+
+A standalone, document-agnostic HTTP microservice wrapping official EasyOCR is located in `services/easyocr-service/`:
+*   **Purpose**: Standalone OCR service prepared as a future secondary fallback when ServiceNow Document Intelligence produces low-confidence tokens.
+*   **Strict Boundary**: Operates independently and is **NOT connected to the live Bridge360 runtime** yet.
+*   **Zero Document Schemas**: Outputs pure raw OCR observations (`text`, `lines`, `words`, `bounding_box`, `confidence`). Contains no identity schemas or document-specific fields.
+*   **Run Locally**:
+    ```bash
+    cd services/easyocr-service
+    python app.py
+    ```
+*   **Run Tests**:
+    ```bash
+    cd services/easyocr-service
+    python test_service.py
+    ```
+For full details, see [services/easyocr-service/README.md](file:///d:/bridge360/services/easyocr-service/README.md).
 
 ---
 
