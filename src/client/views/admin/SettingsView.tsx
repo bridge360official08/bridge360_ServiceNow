@@ -117,7 +117,7 @@ export const SettingsView: React.FC = () => {
 
             <div>
               <label className="input-label">Target ServiceNow Instance</label>
-              <input className="input-field" value="https://dlt-hck-8017-0004.lab.service-now.com" disabled style={{ background: '#F8FAFC' }} />
+              <input className="input-field" value="https://dev187180.service-now.com" disabled style={{ background: '#F8FAFC' }} />
             </div>
           </div>
 

@@ -23,7 +23,6 @@ import { useBridge360 } from '../../store/Bridge360Context';
 import { DocumentRecord, FamilyMember, CountryRecord, CountryDocumentRecord, CountryDocumentFieldRecord } from '../../types/bridge360';
 import { extractDocumentFields, ExtractionResult } from '../../services/ocrEngine';
 import { snExtractDocument } from '../../services/snApi';
-import { callEasyOCRService } from '../../services/easyOcrClient';
 import { evidenceFoundationService } from '../../services/evidenceFoundationService';
 import { INITIAL_COUNTRIES, INITIAL_COUNTRY_DOCUMENTS } from '../../store/evidenceReferenceData';
 
@@ -392,48 +391,8 @@ export const RegistrationEngine: React.FC<Props> = ({ mode = 'customer', onCompl
     }
   };
 
-/**
- * Generic assessment of ServiceNow Document Intelligence OCR quality.
- * Evaluates execution status, token density, character count, and field match completion.
- * Decoupled from document type, country, or schema rules.
- */
-function assessDocIntelQuality(diResult: any, expectedFieldsCount: number): { sufficient: boolean; reason: string } {
-  if (!diResult) {
-    return { sufficient: false, reason: 'DI_RESPONSE_EMPTY' };
-  }
-  if (!diResult.diOcrUsed) {
-    return { sufficient: false, reason: 'DI_NOT_USED_OR_FAILED' };
-  }
-  const tokenCount = Number(diResult.diTokenCount || 0);
-  if (tokenCount < 4) {
-    return { sufficient: false, reason: `LOW_TOKEN_COUNT (${tokenCount})` };
-  }
-  const textLen = (diResult.rawText || '').trim().length;
-  if (textLen < 20) {
-    return { sufficient: false, reason: `LOW_TEXT_LENGTH (${textLen} chars)` };
-  }
-  const fieldsMatched = diResult.fields ? Object.keys(diResult.fields).length : 0;
-  if (expectedFieldsCount > 0 && fieldsMatched === 0 && textLen < 40) {
-    return { sufficient: false, reason: `ZERO_FIELDS_MATCHED (${textLen} chars)` };
-  }
-  return { sufficient: true, reason: 'SUFFICIENT' };
-}
-
-/**
- * Extract applicable languages generically from the country configuration where available.
- * No hardcoded country-to-language maps.
- */
-function getDynamicLanguagesFromCountry(officialLanguages?: string): string[] | undefined {
-  if (!officialLanguages || !officialLanguages.trim()) return undefined;
-  const tokens = officialLanguages
-    .split(/[,;\/]+/)
-    .map(t => t.trim().toLowerCase())
-    .filter(Boolean);
-  return tokens.length > 0 ? tokens : undefined;
-}
-
+  // AUTOMATIC DOCUMENT VERIFICATION & EXTRACTION
   // AUTOMATIC DOCUMENT VERIFICATION & DYNAMIC EXTRACTION
-  // DI PRIMARY -> GENERIC QUALITY CHECK -> EASYOCR SECONDARY FALLBACK
   const handleInitialDocUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files || e.target.files.length === 0) return;
     const file = e.target.files[0];
@@ -457,13 +416,23 @@ function getDynamicLanguagesFromCountry(officialLanguages?: string): string[] | 
         type: f.fieldType,
       }));
 
-      // Step 2: Native ServiceNow Document Intelligence Engine (PRIMARY)
+      // Step 2: Produce OCR Text & Layout
       setDocIntelLoadingStep(2);
-      setDocIntelStatus('Running ServiceNow Document Intelligence (Primary)...');
+      setDocIntelStatus('Reading document text and layout...');
+      const localResult: ExtractionResult = await extractDocumentFields(file, expectedFieldDefs);
+      const rawExtracted = localResult?.rawText || '';
+      setOcrRawText(rawExtracted);
+
+      // Step 3: ServiceNow Native Document Intelligence / Server-side Processing
+      await new Promise(r => setTimeout(r, 300));
+      setDocIntelLoadingStep(3);
+      setDocIntelStatus('Extracting document-configured fields...');
 
       let snDocIntelResult: any = null;
       try {
         snDocIntelResult = await snExtractDocument({
+          text: rawExtracted,
+          rawText: rawExtracted,
           fileName: file.name,
           fileSize: `${(file.size / (1024 * 1024)).toFixed(2)} MB`,
           fileBase64: fileDataUrl,
@@ -472,85 +441,11 @@ function getDynamicLanguagesFromCountry(officialLanguages?: string): string[] | 
           documentType: selectedDocType,
           expectedFields: expectedFieldDefs,
         });
+        if (snDocIntelResult?.diOcrUsed && snDocIntelResult?.rawText) {
+          setOcrRawText(snDocIntelResult.rawText);
+        }
       } catch (snErr) {
-        console.warn('[OCR Pipeline] Primary ServiceNow Document Intelligence call completed with fallback:', snErr);
-      }
-
-      // Step 3: Generic DI Quality Assessment
-      setDocIntelLoadingStep(3);
-      setDocIntelStatus('Evaluating extraction quality...');
-
-      const diAssessment = assessDocIntelQuality(snDocIntelResult, expectedFieldDefs.length);
-      let selectedOcrSource: 'DI' | 'EASYOCR' | 'CLIENT_OCR' = 'DI';
-      let activeRawText = (snDocIntelResult?.rawText || '').trim();
-      let activeFields: Record<string, any> = snDocIntelResult?.fields || {};
-
-      if (diAssessment.sufficient) {
-        console.info(
-          `[OCR Pipeline] DI SUFFICIENT (tokens: ${snDocIntelResult?.diTokenCount}, length: ${activeRawText.length}, fields: ${Object.keys(activeFields).length}). EasyOCR secondary fallback skipped.`
-        );
-        selectedOcrSource = 'DI';
-        setOcrRawText(activeRawText);
-      } else {
-        // Fallback: DI Insufficient -> invoke secondary EasyOCR microservice
-        console.info(
-          `[OCR Pipeline] DI INSUFFICIENT (${diAssessment.reason}). Invoking secondary EasyOCR fallback...`
-        );
-        setDocIntelStatus('Document Intelligence result insufficient. Running secondary EasyOCR fallback...');
-
-        const dynamicLangs = getDynamicLanguagesFromCountry(selectedCountry?.officialLanguages);
-        const easyOcrResult = await callEasyOCRService(fileDataUrl, {
-          languages: dynamicLangs,
-        });
-
-        if (easyOcrResult.success && easyOcrResult.text && easyOcrResult.text.trim().length > 0) {
-          console.info(
-            `[OCR Pipeline] EasyOCR secondary fallback succeeded in ${easyOcrResult.processing_time_ms}ms (chars: ${easyOcrResult.text.length}). Passing OCR text into dynamic extraction pipeline.`
-          );
-          selectedOcrSource = 'EASYOCR';
-          activeRawText = easyOcrResult.text.trim();
-          setOcrRawText(activeRawText);
-
-          // Pass EasyOCR OCR text into existing dynamic extraction pipeline
-          try {
-            const dynamicExtractRes = await snExtractDocument({
-              text: activeRawText,
-              rawText: activeRawText,
-              fileName: file.name,
-              countryId: selectedCountryId,
-              countryDocumentId: selectedCountryDocId,
-              documentType: selectedDocType,
-              expectedFields: expectedFieldDefs,
-            });
-            if (dynamicExtractRes?.fields && Object.keys(dynamicExtractRes.fields).length > 0) {
-              activeFields = dynamicExtractRes.fields;
-            }
-          } catch (dynErr) {
-            console.warn('[OCR Pipeline] Error passing EasyOCR text to dynamic extraction:', dynErr);
-          }
-        } else {
-          console.warn(
-            `[OCR Pipeline] EasyOCR fallback unavailable or empty (${easyOcrResult.error || 'no text'}). Preserving original DI result and continuing safely.`
-          );
-          // Preserve whatever DI result existed
-          selectedOcrSource = 'DI';
-        }
-      }
-
-      // If both DI and EasyOCR yielded no text, invoke client OCR as emergency safety net
-      if (!activeRawText) {
-        try {
-          const localResult: ExtractionResult = await extractDocumentFields(file, expectedFieldDefs);
-          if (localResult?.rawText) {
-            activeRawText = localResult.rawText;
-            setOcrRawText(activeRawText);
-            if (localResult.fields && Object.keys(activeFields).length === 0) {
-              activeFields = localResult.fields;
-            }
-          }
-        } catch (localErr) {
-          // Graceful ignore
-        }
+        console.warn('Server DocIntel call completed with fallback:', snErr);
       }
 
       setDocIntelLoadingStep(4);
@@ -567,8 +462,22 @@ function getDynamicLanguagesFromCountry(officialLanguages?: string): string[] | 
 
       const allDynamicFields: Record<string, any> = {};
 
-      if (activeFields) {
-        for (const [k, v] of Object.entries(activeFields)) {
+      // Ingest from client OCR results (filtered strictly to configured document fields)
+      if (localResult?.fields) {
+        for (const [k, v] of Object.entries(localResult.fields)) {
+          const val = (v as any)?.value !== undefined ? (v as any).value : v;
+          if (val !== undefined && val !== null && String(val).trim()) {
+            const canonicalKey = configuredNameMap.size > 0 ? configuredNameMap.get(k.toLowerCase()) : k;
+            if (canonicalKey) {
+              allDynamicFields[canonicalKey] = typeof val === 'string' ? val.trim() : val;
+            }
+          }
+        }
+      }
+
+      // Ingest from server DocIntel results (server fields take precedence, filtered strictly to configured document fields)
+      if (snDocIntelResult?.fields) {
+        for (const [k, v] of Object.entries(snDocIntelResult.fields)) {
           const val = (v as any)?.value !== undefined ? (v as any).value : v;
           if (val !== undefined && val !== null && String(val).trim()) {
             const canonicalKey = configuredNameMap.size > 0 ? configuredNameMap.get(k.toLowerCase()) : k;
@@ -605,7 +514,7 @@ function getDynamicLanguagesFromCountry(officialLanguages?: string): string[] | 
           verified: false,
         })),
         extractedJson: JSON.stringify(allDynamicFields),
-        ocrRawText: activeRawText,
+        ocrRawText: (snDocIntelResult?.diOcrUsed && snDocIntelResult?.rawText) ? snDocIntelResult.rawText : rawExtracted,
         fileDataUrl: fileDataUrl,
         previewUrl: fileDataUrl,
       };

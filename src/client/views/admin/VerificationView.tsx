@@ -398,7 +398,7 @@ export const VerificationView: React.FC = () => {
             category: d.documentCategory,
             issuing_authority: d.issuingAuthorityDesc || '',
             security_features: d.securityFeatures || '',
-            electronic_verification: d.electronicVerificationAvailable,
+            electronic_verification: d.electronicVerificationAvailable ?? false,
           })),
           detected_documents: familyDocs.map(d => {
             const matched = countryDocCatalog.find(cd =>

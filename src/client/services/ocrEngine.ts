@@ -229,7 +229,6 @@ export function parseMRZ(rawText: string): ExtractionResult | null {
 
 const PATTERNS: Record<string, RegExp> = {
   email:    /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/,
-  phone:    /(?:\+\d{1,3}[\s\-.]?)?\(?\d{3,4}\)?[\s\-.]?\d{3,4}[\s\-.]?\d{3,4}/,
   linkedin: /linkedin\.com\/in\/[a-zA-Z0-9\-_]+/i,
   github:   /github\.com\/[a-zA-Z0-9\-_]+/i,
   website:  /https?:\/\/[^\s]+|www\.[^\s]+/i,
@@ -237,10 +236,32 @@ const PATTERNS: Record<string, RegExp> = {
 
 function extractByPattern(rawText: string): Record<string, ExtractedField> {
   const fields: Record<string, ExtractedField> = {};
-  for (const [key, re] of Object.entries(PATTERNS)) {
-    const m = rawText.match(re);
-    if (m) fields[key] = { value: m[0], confidence: 92, source: 'pattern' };
+
+  // 1. Generic National / Document ID pattern (12-digit, 13-digit, 9-digit, alphanumeric, continuous)
+  const idMatch = rawText.match(/\b(\d{4}[\s\-]\d{4}[\s\-]\d{4}|\d{5}[\s\-]\d{7}[\s\-]\d{1}|\d{3}[\s\-]\d{2}[\s\-]\d{4}|[A-Z]{1,3}\d{6,12}|\d{8,16})\b/);
+  if (idMatch && !idMatch[1].includes('/')) {
+    fields.national_id = { value: idMatch[1].trim(), confidence: 95, source: 'pattern' };
   }
+
+  // 2. Email pattern
+  const emailMatch = rawText.match(PATTERNS.email);
+  if (emailMatch) {
+    fields.email = { value: emailMatch[0].toLowerCase().trim(), confidence: 95, source: 'pattern' };
+  }
+
+  // 3. Phone pattern (must NOT be an ID candidate)
+  const phoneWithIndicator = rawText.match(/(?:phone|mobile|tel|cell|contact|call|téléphone|telefono|telefon)[ \t.:#\-]*([+]?[\d \t\-().]{7,18}\d)/i);
+  const phoneWithPlus = rawText.match(/(\+\d{1,4}[ \t\-().]{0,2}\d{2,5}[ \t\-().]{1,2}\d{3,5}(?:[ \t\-().]{0,2}\d{0,5})?)/);
+  const pMatch = phoneWithIndicator || phoneWithPlus;
+  if (pMatch && pMatch[1]) {
+    const candidatePhone = pMatch[1].trim();
+    const cleanDigits = candidatePhone.replace(/\D/g, '');
+    const idDigits = idMatch ? idMatch[1].replace(/\D/g, '') : '';
+    if (cleanDigits.length >= 7 && cleanDigits !== idDigits) {
+      fields.phone = { value: candidatePhone, confidence: 90, source: 'pattern' };
+    }
+  }
+
   return fields;
 }
 
@@ -472,6 +493,15 @@ function extractLabeledFields(
         if (lowerKey.includes('gender') || lowerKey === 'sex' || lowerKey === 'sexe' || lowerKey === 'sexo') {
           value = /^f/i.test(value) ? 'Female' : /^m/i.test(value) ? 'Male' : value;
         }
+        if (lowerKey.includes('date') || lowerKey.includes('dob')) {
+          const dm = value.match(/\b\d{1,2}[\/.-]\d{1,2}[\/.-]\d{2,4}\b|\b\d{4}[\/.-]\d{1,2}[\/.-]\d{1,2}\b/);
+          if (dm) {
+            value = dm[0];
+          } else {
+            // Discard invalid garbled date strings
+            continue;
+          }
+        }
 
         fields[fieldKey] = {
           value,
@@ -492,31 +522,36 @@ function extractLabeledFields(
 // ---------------------------------------------------------------------------
 
 const HEADING_STOPWORDS = new Set([
-  'passport', 'republic', 'ministry', 'government', 'authority', 'kingdom',
-  'resume', 'curriculum', 'vitae', 'objective', 'education', 'experience',
-  'skills', 'projects', 'certificate', 'certification', 'summary', 'executive',
-  'profile', 'contact', 'address', 'identity', 'national', 'card', 'birth',
-  'united', 'states', 'about', 'me', 'linkedin', 'github', 'email', 'phone',
-  'achievements', 'awards', 'languages', 'references', 'interests', 'hobbies',
-  'declaration', 'signature', 'personal', 'details', 'document', 'issued',
-  'valid', 'expiry', 'place', 'sex', 'country', 'leetcode', 'portfolio',
+  'passport', 'republic', 'ministry', 'government', 'authority', 'kingdom', 'federation',
+  'department', 'state', 'national', 'card', 'birth', 'united', 'states', 'about', 'me',
+  'linkedin', 'github', 'email', 'phone', 'declaration', 'signature', 'personal', 'details',
+  'document', 'issued', 'valid', 'expiry', 'place', 'sex', 'country', 'leetcode', 'portfolio',
+  'gouvernement', 'republique', 'ministere', 'gobierno', 'republica', 'ministerio',
+  'bundesrepublik', 'bundesministerium', 'identite', 'identidad', 'ausweis', 'tarjeta',
+  'cedula', 'carte', 'resident', 'citizen', 'registration', 'democratic', 'socialist',
+  'confederation', 'sultanate', 'emirates', 'commonwealth'
 ]);
 
 function looksLikeNameLine(text: string): boolean {
-  const cleaned = text.trim();
-  const words = cleaned.split(/\s+/);
+  // Clean surrounding punctuation or bracket artifacts from OCR borders
+  const cleaned = text.replace(/^[^a-zA-Z\p{L}]+|[^a-zA-Z\p{L}]+$/gu, '').trim();
+  const words = cleaned.split(/\s+/).filter(Boolean);
   if (words.length < 2 || words.length > 5) return false;
-  if (/[@/:]/.test(cleaned)) return false;
+  if (/[@/:\\#]/.test(cleaned) || /https?|www\./i.test(cleaned)) return false;
   // If line contains digits, not a pure name line
   if (/\d/.test(cleaned)) return false;
   
   for (const w of words) {
-    const c = w.replace(/[.,]/g, '');
-    if (c.length < 1) continue;
+    const c = w.replace(/[.,\-']/g, '');
+    if (c.length < 2) return false;
     if (HEADING_STOPWORDS.has(c.toLowerCase())) return false;
-    // Allow capitalized or all-caps names or initials (e.g. "PRAWIN BALAJI A" or "John Doe")
-    if (!/^[A-Za-z.\-']+$/.test(c)) return false;
+    // Reject 2-letter non-vowel OCR noise tokens like "Ct", "Zs", "Qr", "Xy" (for Latin alphabet)
+    if (c.length === 2 && !/[aeiouy\p{M}]/iu.test(c)) return false;
+    // Allow Unicode letters, hyphens, and apostrophes (supports accented European, Nordic, Asian transliterations, etc.)
+    if (!/^[\p{L}.\-']+$/u.test(c)) return false;
   }
+  // At least one word must be a substantial name token (>= 3 chars)
+  if (!words.some(w => w.replace(/[.,\-']/g, '').length >= 3)) return false;
   return true;
 }
 
@@ -524,10 +559,10 @@ function extractNameHeuristic(rawText: string): Record<string, ExtractedField> {
   const fields: Record<string, ExtractedField> = {};
   const lines = rawText.split('\n').map((l) => l.trim()).filter(Boolean);
   
-  for (let i = 0; i < Math.min(lines.length, 18); i++) {
+  for (let i = 0; i < Math.min(lines.length, 22); i++) {
     const line = lines[i];
     if (looksLikeNameLine(line)) {
-      const parts = line.split(/\s+/).map(p => p.trim()).filter(Boolean);
+      const parts = line.replace(/^[^a-zA-Z\p{L}]+|[^a-zA-Z\p{L}]+$/gu, '').split(/\s+/).map(p => p.trim()).filter(Boolean);
       if (parts.length >= 2) {
         fields.firstName = { value: toTitleCase(parts[0]), confidence: 95, source: 'heuristic' };
         fields.lastName = { value: toTitleCase(parts[parts.length - 1]), confidence: 95, source: 'heuristic' };
@@ -546,16 +581,25 @@ function extractAddressHeuristics(rawText: string): Record<string, ExtractedFiel
   const lines = rawText.split('\n').map((l) => l.trim()).filter(Boolean);
   
   for (const line of lines) {
-    // Address pattern
-    if (/apartment|street|road|avenue|sector|flat|nagar|lane|block|mogappair|salai/i.test(line)) {
-      fields.address = { value: line, confidence: 90, source: 'pattern' };
+    // Generic address road/building/district tokens in English, French, Spanish, German, Arabic translit, etc.
+    if (/\b(street|road|avenue|lane|drive|way|boulevard|bldg|building|apartment|flat|suite|block|sector|district|quarter|rue|avenida|calle|strasse|via|domicile|p\.?o\.?\s*box)\b/i.test(line)) {
+      if (!fields.address && line.length >= 8) {
+        fields.address = { value: line, confidence: 90, source: 'pattern' };
+      }
     }
-    // City & Postal Code
-    const cityMatch = line.match(/(Chennai|Damascus|Kabul|Kyiv|Khartoum|London|New York|Toronto|Berlin|Paris|Mumbai|Delhi|Bangalore)[,\s\-]+(\d{2,6})?/i);
-    if (cityMatch) {
-      fields.city = { value: toTitleCase(cityMatch[1]), confidence: 92, source: 'pattern' };
-      if (cityMatch[2]) {
-        fields.postalCode = { value: cityMatch[2], confidence: 90, source: 'pattern' };
+
+    // Generic City & Postal Code matcher (e.g., "Cityname 12345" or "12345 Cityname")
+    const postalMatch = line.match(/\b([A-Z\p{L}]{3,25})[,\s\-]+(\d{4,8})\b/u) || line.match(/\b(\d{4,8})[,\s\-]+([A-Z\p{L}]{3,25})\b/u);
+    if (postalMatch) {
+      const candidateCity = /^\d+$/.test(postalMatch[1]) ? postalMatch[2] : postalMatch[1];
+      const candidatePostal = /^\d+$/.test(postalMatch[1]) ? postalMatch[1] : postalMatch[2];
+      if (!HEADING_STOPWORDS.has(candidateCity.toLowerCase())) {
+        if (!fields.city) {
+          fields.city = { value: toTitleCase(candidateCity), confidence: 90, source: 'pattern' };
+        }
+        if (!fields.postalCode) {
+          fields.postalCode = { value: candidatePostal, confidence: 90, source: 'pattern' };
+        }
       }
     }
   }
@@ -587,6 +631,214 @@ async function extractCountryFromPhone(
 // Main entry point
 // ---------------------------------------------------------------------------
 
+export function extractFieldsFromText(
+  text: string,
+  expectedFields?: Array<{ name: string; type?: string }>
+): Record<string, ExtractedField> {
+  const words: TesseractWord[] = [];
+  const lines = text.split('\n');
+  let currentY = 10;
+  for (const line of lines) {
+    const lineWords = line.split(/\s+/).filter(Boolean);
+    let currentX = 10;
+    for (const w of lineWords) {
+      words.push({
+        text: w,
+        confidence: 90,
+        bbox: { x0: currentX, y0: currentY, x1: currentX + w.length * 10, y1: currentY + 14 }
+      });
+      currentX += w.length * 10 + 10;
+    }
+    currentY += 20;
+  }
+
+  const hasConfiguredSchema = Array.isArray(expectedFields) && expectedFields.length > 0;
+  if (!hasConfiguredSchema) {
+    return {};
+  }
+
+  const expectedNameMap = new Map<string, string>();
+  for (const f of expectedFields) {
+    if (f && f.name) {
+      expectedNameMap.set(f.name.toLowerCase().trim(), f.name);
+    }
+  }
+
+  const labelFields = extractLabeledFields(text, words, expectedFields);
+  const patternFields = extractByPattern(text);
+  const mrzResult = parseMRZ(text);
+  const addrFields = extractAddressHeuristics(text);
+  const nameHeur = extractNameHeuristic(text);
+
+  const layer1Fields: Record<string, ExtractedField> = {};
+
+  for (const [k, v] of Object.entries(labelFields)) {
+    const canonical = expectedNameMap.get(k.toLowerCase()) || k;
+    layer1Fields[canonical] = v;
+  }
+
+  const isPhoneField = (fn: string): boolean => {
+    const f = fn.toLowerCase().trim();
+    if (f.includes('email')) return false;
+    return f.includes('phone') || f.includes('mobile') || f.includes('tel') || f.includes('cell') || f.includes('contact');
+  };
+
+  const isIdentifierField = (fn: string): boolean => {
+    const f = fn.toLowerCase().trim();
+    if (isPhoneField(f)) return false;
+    if (f.includes('date') || f.includes('dob') || f.includes('birth')) return false;
+    if (f.includes('address') || f.includes('place') || f.includes('location') || f.includes('residence')) return false;
+    if (f.includes('photo') || f.includes('signature') || f.includes('image') || f.includes('thumb')) return false;
+    if (f.includes('name') && !f.includes('number') && !f.includes('_id')) return false;
+    return (
+      f.includes('number') ||
+      f.includes('_no') ||
+      f.includes('no_') ||
+      f.includes('_id') ||
+      f.includes('id_') ||
+      f === 'id' ||
+      f === 'nid' ||
+      f.includes('identifier') ||
+      f.includes('code') ||
+      f.includes('num') ||
+      f === 'curp' ||
+      f === 'cpf' ||
+      f === 'inn' ||
+      f === 'ssn' ||
+      f === 'sin' ||
+      f === 'cni' ||
+      f === 'dni' ||
+      f === 'nie' ||
+      f === 'nric' ||
+      f === 'bvn' ||
+      f === 'nin' ||
+      f === 'snils' ||
+      f === 'pesel' ||
+      f === 'kela' ||
+      f === 'mykad' ||
+      f === 'absher' ||
+      f === 'hukou' ||
+      f === 'samordningsnummer'
+    );
+  };
+
+  const idPatterns = [
+    // 12-digit grouped ID (e.g. Aadhaar: 4412 8842 1293 or 4412-8842-1293)
+    /\b(\d{4}[\s\-]\d{4}[\s\-]\d{4})\b/,
+    // 13-digit 5-7-1 format (e.g. Pakistani CNIC: 12345-1234567-1)
+    /\b(\d{5}[\s\-]\d{7}[\s\-]\d{1})\b/,
+    // 9-digit 3-2-4 format (e.g. US SSN: 123-45-6789)
+    /\b(\d{3}[\s\-]\d{2}[\s\-]\d{4})\b/,
+    // 3 groups of digits (e.g. 123 456 789 or 1234 5678 9012)
+    /\b(\d{3,5}[\s\-]\d{3,5}[\s\-]\d{3,5})\b/,
+    // Alphanumeric document IDs (e.g. Passports: A12345678, DLs: DL123456789012)
+    /\b([A-Z]{1,3}\d{6,12})\b/,
+    // Continuous 9 to 16 digit IDs
+    /\b(\d{9,16})\b/,
+    // Continuous 8 digit IDs
+    /\b(\d{8})\b/
+  ];
+
+  let bestPatternId = '';
+  for (const p of idPatterns) {
+    const m = text.match(p);
+    if (m && m[1]) {
+      const candidate = m[1].trim();
+      if (!candidate.includes('/') && candidate.length >= 8) {
+        bestPatternId = candidate;
+        break;
+      }
+    }
+  }
+
+  // Assign or upgrade identifier fields across expected schema
+  for (const [lowKey, exactName] of expectedNameMap.entries()) {
+    if (isIdentifierField(lowKey)) {
+      const existingVal = layer1Fields[exactName]?.value || '';
+      const existingDigitsCount = existingVal.replace(/\D/g, '').length;
+      const bestDigitsCount = bestPatternId.replace(/\D/g, '').length;
+
+      // If missing or if existing is truncated/partial while a fuller pattern was detected:
+      if (!existingVal && bestPatternId) {
+        layer1Fields[exactName] = { value: bestPatternId, confidence: 92, source: 'pattern' };
+      } else if (bestPatternId && existingDigitsCount < 10 && bestDigitsCount >= 10) {
+        layer1Fields[exactName] = { value: bestPatternId, confidence: 92, source: 'pattern' };
+      }
+    }
+  }
+
+  for (const [lowKey, exactName] of expectedNameMap.entries()) {
+    if (!layer1Fields[exactName]) {
+      if (
+        (lowKey === 'full_name' || lowKey.endsWith('_name') || lowKey === 'name' || lowKey.includes('holder') || lowKey.includes('nom_complet') || lowKey.includes('nombre_completo')) &&
+        !lowKey.includes('father') && !lowKey.includes('mother') && !lowKey.includes('spouse') && !lowKey.includes('parent') && !lowKey.includes('guardian')
+      ) {
+        const surnameVal = layer1Fields.last_name?.value || layer1Fields.surname?.value || layer1Fields.nom?.value || layer1Fields.apellidos?.value;
+        const givenVal = layer1Fields.first_name?.value || layer1Fields.given_name?.value || layer1Fields.prenoms?.value || layer1Fields.prenom?.value || layer1Fields.forename?.value || layer1Fields.nombres?.value;
+        if (surnameVal && givenVal) {
+          layer1Fields[exactName] = { value: `${surnameVal} ${givenVal}`, confidence: 90, source: 'label' };
+        } else if (nameHeur.firstName && nameHeur.lastName) {
+          const fullNameVal = [nameHeur.firstName.value, (nameHeur.middleName?.value || ''), nameHeur.lastName.value].filter(Boolean).join(' ');
+          layer1Fields[exactName] = { value: fullNameVal, confidence: 90, source: 'heuristic' };
+        }
+      } else if (lowKey === 'first_name' || lowKey === 'given_name' || lowKey === 'prenom' || lowKey === 'forename' || lowKey === 'nombres') {
+        if (nameHeur.firstName) {
+          layer1Fields[exactName] = nameHeur.firstName;
+        }
+      } else if (lowKey === 'last_name' || lowKey === 'surname' || lowKey === 'family_name' || lowKey === 'nom' || lowKey === 'apellidos') {
+        if (nameHeur.lastName) {
+          layer1Fields[exactName] = nameHeur.lastName;
+        }
+      } else if (lowKey === 'middle_name' || lowKey === 'segundo_nombre') {
+        if (nameHeur.middleName) {
+          layer1Fields[exactName] = nameHeur.middleName;
+        }
+      }
+
+      if ((lowKey === 'date_of_birth' || lowKey === 'dob' || lowKey.includes('birth') || lowKey.includes('naissance') || lowKey.includes('nacimiento') || lowKey.includes('geburt')) && !layer1Fields[exactName]) {
+        const dobRegex = /(?:dob|date of birth|birth date|born|naissance|n[eé](?:e)? le|fecha de nacimiento|geburtsdatum|data di nascita|do[gğ]um tarihi)[ \t.:#\-\[]*(\d{1,2}[\/.-]\d{1,2}[\/.-]\d{2,4}|\d{4}[\/.-]\d{1,2}[\/.-]\d{1,2})/i;
+        const dm = text.match(dobRegex);
+        if (dm && dm[1]) {
+          layer1Fields[exactName] = { value: dm[1], confidence: 90, source: 'pattern' };
+        }
+      }
+
+      if ((lowKey === 'address' || lowKey === 'residential_address' || lowKey === 'domicile' || lowKey === 'direccion') && addrFields.address) {
+        layer1Fields[exactName] = addrFields.address;
+      }
+
+      if (isPhoneField(lowKey)) {
+        const phoneRegexWithIndicator = /(?:phone|mobile|tel|cell|contact|call)[ \t.:#\-]*([+]?[\d \t\-().]{7,18}\d)/i;
+        const phoneRegexWithPlus = /(\+\d{1,4}[ \t\-().]{0,2}\d{2,5}[ \t\-().]{1,2}\d{3,5}(?:[ \t\-().]{0,2}\d{0,5})?)/;
+        const pMatch = text.match(phoneRegexWithIndicator) || text.match(phoneRegexWithPlus);
+        if (pMatch && pMatch[1]) {
+          const candidatePhone = pMatch[1].trim();
+          const cleanPhoneDigits = candidatePhone.replace(/\D/g, '');
+          const cleanIdDigits = (bestPatternId || '').replace(/\D/g, '');
+          if (cleanPhoneDigits.length >= 7 && cleanPhoneDigits !== cleanIdDigits) {
+            layer1Fields[exactName] = { value: candidatePhone, confidence: 90, source: 'pattern' };
+          }
+        }
+      }
+
+      if ((lowKey === 'email' || lowKey === 'email_masked') && patternFields.email) {
+        layer1Fields[exactName] = patternFields.email;
+      }
+
+      if ((lowKey === 'gender' || lowKey === 'sex' || lowKey === 'sexe' || lowKey === 'sexo' || lowKey === 'geschlecht') && !layer1Fields[exactName]) {
+        const gm = text.match(/\b(Male|Female|Homme|Femme|Masculino|Femenino|M[äa]nnlich|Weiblich|Maschile|Femminile|Erkek|Kad[ıi]n)\b/i);
+        if (gm && gm[1]) {
+          const rawVal = gm[1].toLowerCase();
+          const gVal = (rawVal.startsWith('f') || rawVal === 'femme' || rawVal === 'weiblich' || rawVal === 'kadın' || rawVal === 'kadin') ? 'Female' : 'Male';
+          layer1Fields[exactName] = { value: gVal, confidence: 90, source: 'pattern' };
+        }
+      }
+    }
+  }
+
+  return layer1Fields;
+}
+
 export async function extractDocumentFields(
   file: File,
   expectedFields?: Array<{ name: string; type?: string }>
@@ -597,167 +849,7 @@ export async function extractDocumentFields(
   const hasConfiguredSchema = Array.isArray(expectedFields) && expectedFields.length > 0;
 
   if (hasConfiguredSchema) {
-    // ── LAYER 1: STRICT DOCUMENT-CONFIGURED EXTRACTION ──
-    // The configured fields from u_bridge360_country_document_field are the sole source of truth.
-    const expectedNameMap = new Map<string, string>();
-    for (const f of expectedFields) {
-      if (f && f.name) {
-        expectedNameMap.set(f.name.toLowerCase().trim(), f.name);
-      }
-    }
-
-    const labelFields = extractLabeledFields(text, words, expectedFields);
-    const patternFields = extractByPattern(text);
-    const mrzResult = parseMRZ(text);
-    const addrFields = extractAddressHeuristics(text);
-    const nameHeur = extractNameHeuristic(text);
-
-    const layer1Fields: Record<string, ExtractedField> = {};
-
-    // 1. Primary: Labeled extraction matching configured field definitions
-    for (const [k, v] of Object.entries(labelFields)) {
-      const canonical = expectedNameMap.get(k.toLowerCase()) || k;
-      layer1Fields[canonical] = v;
-    }
-
-    // Semantic field classifiers (fully dynamic and document/country agnostic)
-    const isPhoneField = (fn: string): boolean => {
-      const f = fn.toLowerCase().trim();
-      if (f.includes('email')) return false;
-      return f.includes('phone') || f.includes('mobile') || f.includes('tel') || f.includes('cell') || f.includes('contact');
-    };
-
-    const isIdentifierField = (fn: string): boolean => {
-      const f = fn.toLowerCase().trim();
-      if (isPhoneField(f)) return false;
-      if (f.includes('date') || f.includes('dob')) return false;
-      if (f.includes('address') || f.includes('place') || f.includes('location') || f.includes('residence')) return false;
-      if (f.includes('photo') || f.includes('signature') || f.includes('image') || f.includes('thumb')) return false;
-      if (f.includes('name') && !f.includes('number') && !f.includes('_id')) return false;
-      return (
-        f.includes('number') ||
-        f.includes('_no') ||
-        f.includes('no_') ||
-        f.includes('_id') ||
-        f.includes('id_') ||
-        f === 'id' ||
-        f === 'nid' ||
-        f.includes('identifier') ||
-        f.includes('code')
-      );
-    };
-
-    // Generic structured identifier extraction into unpopulated configured identifier fields
-    let extractedIdValue = '';
-    for (const [lowKey, exactName] of expectedNameMap.entries()) {
-      if (isIdentifierField(lowKey) && layer1Fields[exactName]?.value) {
-        extractedIdValue = layer1Fields[exactName].value;
-        break;
-      }
-    }
-
-    if (!extractedIdValue) {
-      const idPatterns = [
-        /\b(\d{4}[\s\-]\d{4}[\s\-]\d{4})\b/,
-        /\b(\d{5}[\s\-]\d{7}[\s\-]\d{1})\b/,
-        /\b(\d{3}[\s\-]\d{2}[\s\-]\d{4})\b/,
-        /\b(\d{3,5}[\s\-]\d{3,5}[\s\-]\d{3,5})\b/,
-        /\b([A-Z]{1,3}\d{6,10})\b/,
-        /\b(\d{8,16})\b/
-      ];
-      for (const p of idPatterns) {
-        const m = text.match(p);
-        if (m && m[1]) {
-          const candidate = m[1].trim();
-          if (!candidate.includes('/') && candidate.length >= 8) {
-            extractedIdValue = candidate;
-            for (const [lowKey, exactName] of expectedNameMap.entries()) {
-              if (isIdentifierField(lowKey) && !layer1Fields[exactName]) {
-                layer1Fields[exactName] = { value: candidate, confidence: 90, source: 'pattern' };
-                break;
-              }
-            }
-            break;
-          }
-        }
-      }
-    }
-
-    // 2. Helper mappings strictly into configured fields if not already populated:
-    for (const [lowKey, exactName] of expectedNameMap.entries()) {
-      if (!layer1Fields[exactName]) {
-        // Name field helper
-        if (
-          (lowKey === 'full_name' || lowKey.endsWith('_name') || lowKey === 'name') &&
-          !lowKey.includes('father') && !lowKey.includes('mother') && !lowKey.includes('spouse')
-        ) {
-          const surnameVal = layer1Fields.last_name?.value || layer1Fields.surname?.value || layer1Fields.nom?.value || layer1Fields.postnom?.value;
-          const givenVal = layer1Fields.first_name?.value || layer1Fields.given_name?.value || layer1Fields.prenoms?.value || layer1Fields.forename?.value;
-          if (surnameVal && givenVal) {
-            layer1Fields[exactName] = { value: `${surnameVal} ${givenVal}`, confidence: 90, source: 'label' };
-          } else if (nameHeur.firstName && nameHeur.lastName) {
-            const fullNameVal = [nameHeur.firstName.value, (nameHeur.middleName?.value || ''), nameHeur.lastName.value].filter(Boolean).join(' ');
-            layer1Fields[exactName] = { value: fullNameVal, confidence: 85, source: 'heuristic' };
-          }
-        } else if (lowKey === 'first_name' || lowKey === 'given_name') {
-          if (nameHeur.firstName) {
-            layer1Fields[exactName] = nameHeur.firstName;
-          }
-        } else if (lowKey === 'last_name' || lowKey === 'surname') {
-          if (nameHeur.lastName) {
-            layer1Fields[exactName] = nameHeur.lastName;
-          }
-        }
-
-        // Address field helper
-        if ((lowKey === 'address' || lowKey === 'residential_address') && addrFields.address) {
-          layer1Fields[exactName] = addrFields.address;
-        }
-
-        // Contact pattern helpers (Context-aware: only if explicit phone indicator or '+' and does not collide with ID)
-        if (isPhoneField(lowKey)) {
-          const phoneRegexWithIndicator = /(?:phone|mobile|tel|cell|contact|call)[ \t.:#\-]*([+]?[\d \t\-().]{7,18}\d)/i;
-          const phoneRegexWithPlus = /(\+\d{1,4}[ \t\-().]{0,2}\d{2,5}[ \t\-().]{1,2}\d{3,5}(?:[ \t\-().]{0,2}\d{0,5})?)/;
-          const pMatch = text.match(phoneRegexWithIndicator) || text.match(phoneRegexWithPlus);
-          if (pMatch && pMatch[1]) {
-            const candidatePhone = pMatch[1].trim();
-            const cleanPhoneDigits = candidatePhone.replace(/\D/g, '');
-            const cleanIdDigits = extractedIdValue.replace(/\D/g, '');
-            if (cleanPhoneDigits.length >= 7 && cleanPhoneDigits !== cleanIdDigits) {
-              layer1Fields[exactName] = { value: candidatePhone, confidence: 90, source: 'pattern' };
-            }
-          }
-        }
-        if ((lowKey === 'email' || lowKey === 'email_masked') && patternFields.email) {
-          layer1Fields[exactName] = patternFields.email;
-        }
-
-        // MRZ helper if document has MRZ
-        if (mrzResult && mrzResult.fields) {
-          if ((lowKey === 'passport_number' || lowKey === 'document_number') && mrzResult.fields.passportNumber) {
-            layer1Fields[exactName] = mrzResult.fields.passportNumber;
-          } else if ((lowKey === 'date_of_birth' || lowKey === 'dob') && mrzResult.fields.dateOfBirth) {
-            layer1Fields[exactName] = mrzResult.fields.dateOfBirth;
-          } else if ((lowKey === 'expiry_date' || lowKey === 'date_of_expiry') && mrzResult.fields.expiryDate) {
-            layer1Fields[exactName] = mrzResult.fields.expiryDate;
-          } else if ((lowKey === 'gender' || lowKey === 'sex') && mrzResult.fields.gender) {
-            layer1Fields[exactName] = mrzResult.fields.gender;
-          } else if ((lowKey === 'nationality' || lowKey === 'citizenship') && mrzResult.fields.nationality) {
-            layer1Fields[exactName] = mrzResult.fields.nationality;
-          }
-        }
-
-        // Standalone gender helper if configured and not yet populated
-        if ((lowKey === 'gender' || lowKey === 'sex' || lowKey === 'sexe' || lowKey === 'sexo') && !layer1Fields[exactName]) {
-          const gm = text.match(/\b(Male|Female|Homme|Femme|Masculino|Femenino|Männlich|Weiblich)\b/i);
-          if (gm && gm[1]) {
-            const gVal = gm[1].charAt(0).toUpperCase() + gm[1].slice(1).toLowerCase();
-            layer1Fields[exactName] = { value: gVal, confidence: 90, source: 'pattern' };
-          }
-        }
-      }
-    }
-
+    const layer1Fields = extractFieldsFromText(text, expectedFields);
     const method = Object.keys(layer1Fields).length ? 'LABEL' : 'NONE';
     return { method, rawText: text, fields: layer1Fields };
   }

@@ -23,7 +23,7 @@ const BASE_URL = (() => {
     return window.location.origin;
   }
   // Non-dev, non-SN host (e.g. a static preview): point at the real instance.
-  return (import.meta as any).env?.VITE_SN_INSTANCE_URL || 'https://dlt-hck-8017-0004.lab.service-now.com';
+  return (import.meta as any).env?.VITE_SN_INSTANCE_URL || 'https://dev187180.service-now.com';
 })();
 
 const API = `${BASE_URL}/api/global/v1`;
@@ -32,7 +32,7 @@ function getHeaders(): Record<string, string> {
   const headers: Record<string, string> = {
     'Content-Type':  'application/json',
     'Accept':        'application/json',
-    'Authorization': 'Basic ' + btoa('admin:5xTebgCVc7Du'),
+    'Authorization': 'Basic ' + btoa('admin:mn%XC1^ScdA4'),
   };
   const userToken = (window as any).g_ck;
   if (userToken) {

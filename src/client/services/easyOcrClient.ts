@@ -46,7 +46,7 @@ export async function callEasyOCRService(
   options?: EasyOcrRequestOptions
 ): Promise<EasyOcrResult> {
   const endpoint = ((import.meta as any).env?.VITE_EASYOCR_URL as string) || '/api/easyocr/ocr';
-  const timeoutMs = options?.timeoutMs ?? 8000;
+  const timeoutMs = options?.timeoutMs ?? 30000;
   const startTime = performance.now();
 
   const controller = new AbortController();

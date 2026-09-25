@@ -21,6 +21,7 @@ import {
 import {
   INITIAL_COUNTRIES,
   INITIAL_COUNTRY_DOCUMENTS,
+  INITIAL_COUNTRY_DOCUMENT_FIELDS,
   INITIAL_EVIDENCE_RULES,
   INITIAL_VERIFICATION_AUTHORITIES,
   INITIAL_VERIFICATION_REQUESTS
@@ -31,6 +32,7 @@ import { snGetTableRecords, snInsertTableRecord, snUpdateTableRecord } from './s
 export class EvidenceFoundationService {
   private localCountries: CountryRecord[] = [...INITIAL_COUNTRIES];
   private localDocuments: CountryDocumentRecord[] = [...INITIAL_COUNTRY_DOCUMENTS];
+  private localDocumentFields: CountryDocumentFieldRecord[] = [...INITIAL_COUNTRY_DOCUMENT_FIELDS];
   private localRules: EvidenceRuleRecord[] = [...INITIAL_EVIDENCE_RULES];
   private localAuthorities: VerificationAuthorityRecord[] = [...INITIAL_VERIFICATION_AUTHORITIES];
   private localRequests: VerificationRequestRecord[] = [...INITIAL_VERIFICATION_REQUESTS];
@@ -131,7 +133,7 @@ export class EvidenceFoundationService {
     } catch (e) {
       console.warn('Could not fetch document fields from ServiceNow:', e);
     }
-    return [];
+    return this.localDocumentFields.filter(f => f.countryDocumentId === countryDocumentId);
   }
 
   // ── 3. Evidence Rules ───────────────────────────────────────────────────

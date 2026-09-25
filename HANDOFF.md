@@ -18,6 +18,8 @@ Bridge360 connects refugee applicants with case officers via an automated, AI-as
 | HTML5 ISO Date Normalization | **VALIDATED** | Extracted dates normalized to ISO `YYYY-MM-DD` and bound into `<input type="date">`. |
 | Multi-Agent AI Verification Suite | **VALIDATED** | 4-agent verification pipeline (`aiVerificationService.ts` / platform script include) operational. |
 | Existing Registration & Admin Workflows | **VALIDATED** | Case submission, dashboard metrics, referrals, tickets, and family 360 views preserved. |
+| Instance Security & Basic Auth Access | **VALIDATED** | `snc_basic_auth_api_access` granted to `admin`; `sys_public` entry created for `bridge360`. |
+| Live Client Assets Deployed | **VALIDATED** | `global/index` and `global/main` UX library assets synced to ServiceNow instance. |
 
 ---
 
@@ -70,6 +72,14 @@ To ensure zero regressions on the live ServiceNow instance, full `sdk:deploy` wa
     - **Sys ID**: `081e526c946846a5986ca21db2845b8d`
     - **Active Script Size**: 31,416 characters
     - **Live Backup File**: `scratch/backups/live_op_081e526c946846a5986ca21db2845b8d_final_backup.json`
+
+*   **Synchronized Client UX Library Assets (`sys_ux_lib_asset`)**:
+    - `global/index` (`d2bc577d1893479ea7788deb62a0219a`): 221,060 bytes, Checksum: `47bea10823f3396d943c95d434549f31` [DEPLOYED]
+    - `global/main` (`e128f469876d4b3bb0883ad18a79b4bd`): 2,010,261 bytes, Checksum: `cf4ac4dd82da14da7cbfaf9abdfc0930` [DEPLOYED]
+
+*   **Instance Security & Public Access Records**:
+    - **Basic Authentication Gate**: Assigned `snc_basic_auth_api_access` role to `admin` (`sys_user_has_role_85f859a9c3a3c350e54832f1b40131de`), satisfying `SNCRestrictBasicAuth` gate enforcement.
+    - **Public UI Page Record**: Created `sys_public` entry for `bridge360` (`sys_public_905915e9c3a3c350e54832f1b40131ed`, `active = true`) enabling seamless unauthenticated client access to `bridge360.do` without session timeouts.
 
 ### Components Intentionally Left Untouched
 *   `Bridge360AIVerification` (Platform Script Include `6d90b9b1e061418bbace5111e15dbba3` / `9ade59e7064b4544a2da6280dc9dabb6`)

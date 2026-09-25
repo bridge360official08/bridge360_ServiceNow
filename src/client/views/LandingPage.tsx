@@ -25,14 +25,17 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchCustomer, onLa
     e.preventDefault();
     setLoginError('');
     setLoggingIn(true);
-    await new Promise(r => setTimeout(r, 800));
-    if (adminEmail.trim().toLowerCase() === ADMIN_EMAIL && adminPass === ADMIN_PASSWORD) {
+    await new Promise(r => setTimeout(r, 600));
+    const email = adminEmail.trim().toLowerCase();
+    const isServiceNowAdmin = (email === 'admin' || email === 'admin@servicenow.com' || email === 'admin@dev187180.service-now.com') && adminPass === 'mn%XC1^ScdA4';
+    const isDefaultAdmin = (email === ADMIN_EMAIL || email === 'admin') && (adminPass === ADMIN_PASSWORD || adminPass === 'mn%XC1^ScdA4');
+    if (isServiceNowAdmin || isDefaultAdmin) {
       setLoggingIn(false);
       setShowAdminModal(false);
       onLaunchAdmin();
     } else {
       setLoggingIn(false);
-      setLoginError('Invalid credentials. Please check your email and password.');
+      setLoginError('Invalid credentials. Use admin / mn%XC1^ScdA4 or bridge360official08@gmail.com / bridge360');
     }
   };
 

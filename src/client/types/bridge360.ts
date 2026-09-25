@@ -260,7 +260,7 @@ export interface CountryDocumentRecord {
   securityFeatures?: string;
   typicalFields?: string;
   validityPeriodDesc?: string;
-  electronicVerificationAvailable: boolean;
+  electronicVerificationAvailable?: boolean;
   active: boolean;
   notes?: string;
 }

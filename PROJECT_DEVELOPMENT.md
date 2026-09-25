@@ -170,4 +170,33 @@ Layer 1 Enforced
 *   **Live ServiceNow Safety**: Document Intelligence, AI Agent Studio, and all 26 live REST operations preserved untouched; `sdk:deploy` was not executed.
 *   **Hardcoding Audit**: 100% free of country-specific or document-specific Layer-1 extraction logic.
 
+---
+
+## 8. Authentication Infrastructure & Client Deployment Resolution
+
+### 8.1 The Problem
+Users attempting to access `https://dev187180.service-now.com/bridge360.do` experienced repeated browser-level HTTP Basic Authentication modal prompts ("Sign in: https://dev187180.service-now.com"). The box reappeared constantly, preventing access to the application UI and causing REST API requests to fail.
+
+### 8.2 Root Cause Analysis
+1.  **ServiceNow Basic Auth Gate Enforcement (`SNCRestrictBasicAuth`)**:
+    - The ServiceNow instance enforces `glide.authenticate.basic_auth.restriction.enforce = true` (enforcement date `2026-09-12 16:31:28`).
+    - Under this gate, any incoming basic auth API request requires the user account to hold the `snc_basic_auth_api_access` role.
+    - The `admin` user did not have this role assigned, causing Table API and Scripted REST endpoints (`/api/global/v1/*`) to respond with `401 Unauthorized` and `WWW-Authenticate: Basic realm="Service-now"`.
+    - Modern web browsers intercept `401 + WWW-Authenticate` and freeze execution with a modal credentials prompt.
+2.  **Missing `sys_public` Registration for UI Page**:
+    - The `bridge360.do` UI page was missing from the ServiceNow `sys_public` registry.
+    - Unauthenticated visitors or expired sessions were redirected to `session_timeout.do` ("You are not logged in, or your session has expired").
+
+### 8.3 Applied Resolutions
+1.  **Assigned `snc_basic_auth_api_access` Role**:
+    - Query and assign `sys_user_role` (`e88934270a674eaf69ee1cc53ac89f2e`) to `admin` (`sys_user_has_role_85f859a9c3a3c350e54832f1b40131de`).
+    - Verified all 21 Bridge360 Scripted REST endpoints respond with HTTP 200/400 (validation) and 0 authentication failures.
+2.  **Registered Public UI Page Access**:
+    - Created `sys_public` entry for `page: 'bridge360'` (`sys_public_905915e9c3a3c350e54832f1b40131ed`, `active = true`).
+    - Verified `bridge360.do` delivers the application HTML directly without session redirects.
+3.  **Targeted Client UX Asset Deployment**:
+    - Recompiled production bundle (`npm run build` and `npm run sdk:build`).
+    - Uploaded targeted UX library assets `global/index` (`d2bc577d1893479ea7788deb62a0219a`) and `global/main` (`e128f469876d4b3bb0883ad18a79b4bd`) with verified checksums.
+
+
 

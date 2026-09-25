@@ -1,7 +1,7 @@
 import https from 'https';
 
-const auth = Buffer.from('admin:5xTebgCVc7Du').toString('base64');
-const HOSTNAME = 'dlt-hck-8017-0004.lab.service-now.com';
+const auth = Buffer.from('admin:mn%XC1^ScdA4').toString('base64');
+const HOSTNAME = 'dev187180.service-now.com';
 const IP_ADDRESS = '158.158.32.123';
 
 export const LANGUAGES = [

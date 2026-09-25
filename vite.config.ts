@@ -25,7 +25,7 @@ export default defineConfig({
         rewrite: (path) => path.replace(/^\/api\/easyocr/, ''),
       },
       '/api': {
-        target: 'https://dlt-hck-8017-0004.lab.service-now.com',
+        target: 'https://dev187180.service-now.com',
         changeOrigin: true,
         secure: false,
       },
