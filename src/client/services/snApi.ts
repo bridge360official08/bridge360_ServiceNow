@@ -32,8 +32,17 @@ function getHeaders(): Record<string, string> {
   const headers: Record<string, string> = {
     'Content-Type':  'application/json',
     'Accept':        'application/json',
-    'Authorization': 'Basic ' + btoa('admin:mn%XC1^ScdA4'),
   };
+  // Local dev only: authenticate to the proxied ServiceNow instance using a
+  // Basic-auth credential supplied via env (format "user:pass"). Never hardcode
+  // credentials in source. On the instance itself we rely on the session token
+  // (g_ck / credentials:include) below, so no Basic header is sent in prod.
+  const basicCreds = (import.meta as any).env?.DEV
+    ? (import.meta as any).env?.VITE_SN_BASIC_AUTH
+    : undefined;
+  if (basicCreds) {
+    headers['Authorization'] = 'Basic ' + btoa(basicCreds);
+  }
   const userToken = (window as any).g_ck;
   if (userToken) {
     headers['X-UserToken'] = userToken;

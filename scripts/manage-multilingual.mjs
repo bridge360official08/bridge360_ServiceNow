@@ -1,6 +1,11 @@
 import https from 'https';
 
-const auth = Buffer.from('admin:mn%XC1^ScdA4').toString('base64');
+// Credentials are supplied via the SN_BASIC_AUTH env var (format "user:pass").
+// Never hardcode instance credentials in source.
+if (!process.env.SN_BASIC_AUTH) {
+  throw new Error('SN_BASIC_AUTH env var is required (format "user:pass"). Set it before running this script.');
+}
+const auth = Buffer.from(process.env.SN_BASIC_AUTH).toString('base64');
 const HOSTNAME = 'dev187180.service-now.com';
 const IP_ADDRESS = '158.158.32.123';
 
