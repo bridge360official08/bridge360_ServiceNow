@@ -88,8 +88,11 @@ export const AssistantChatPanel: React.FC = () => {
   if (!isOpen) return null;
 
   const isCustomer = portal === 'customer';
-  const primaryColor = isCustomer ? '#8B5CF6' : '#0F172A';
-  const accent = isCustomer ? '#7C3AED' : '#10B981';
+  const accent = isCustomer ? '#A855F7' : '#22D3EE';
+  const accentDim = isCustomer ? '#7C3AED' : '#0E7490';
+  const panelBg = isCustomer
+    ? 'linear-gradient(135deg, rgba(49,10,90,.95) 0%, rgba(30,5,60,.92) 100%)'
+    : 'linear-gradient(135deg, rgba(10,16,30,.96) 0%, rgba(19,41,74,.93) 100%)';
   const title = isCustomer
     ? t('assistant.customerTitle', 'Bridge360 Guide')
     : t('assistant.adminTitle', 'AI Intern Assistant');
@@ -136,58 +139,69 @@ export const AssistantChatPanel: React.FC = () => {
   const sourceBadge = (src?: ChatMessage['source']) => {
     if (!src) return null;
     const map = {
-      servicenow: { label: t('assistant.srcSn', 'ServiceNow AI'), color: '#16A34A', icon: true },
-      gemini: { label: t('assistant.srcGemini', 'Gemini'), color: '#2563EB', icon: false },
-      canned: { label: t('assistant.srcOffline', 'offline mode'), color: '#94A3B8', icon: false },
+      servicenow: { label: t('assistant.srcSn', 'ServiceNow AI'), color: '#22C55E', icon: true },
+      gemini: { label: t('assistant.srcGemini', 'Gemini'), color: '#38BDF8', icon: false },
+      canned: { label: t('assistant.srcOffline', 'offline mode'), color: '#64748B', icon: false },
     } as const;
     const cfg = map[src];
     if (!cfg) return null;
     return (
-      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', fontSize: '0.65rem', color: cfg.color, marginTop: '3px' }}>
-        {cfg.icon && <ShieldCheck size={11} />} {cfg.label}
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', fontSize: '0.62rem', color: cfg.color, marginTop: '3px' }}>
+        {cfg.icon && <ShieldCheck size={10} />} {cfg.label}
       </span>
     );
   };
 
   return (
     <div
-      className="animate-slide-up"
       dir={rtl ? 'rtl' : 'ltr'}
       style={{
-        position: 'fixed', bottom: '120px', right: '30px',
-        width: '350px', height: '520px', backgroundColor: 'white',
-        borderRadius: '16px', boxShadow: '0 20px 40px rgba(0,0,0,0.15)',
-        zIndex: 9998, display: 'flex', flexDirection: 'column', overflow: 'hidden',
-        border: `1px solid ${isCustomer ? '#E9D5FF' : '#CBD5E1'}`,
+        position: 'fixed', bottom: '75px', left: '20px',
+        width: '360px', maxHeight: '480px',
+        background: panelBg,
+        backdropFilter: 'blur(16px)',
+        borderRadius: '20px',
+        border: `1px solid ${accent}30`,
+        boxShadow: `0 20px 60px rgba(0,0,0,.35), 0 0 40px ${accent}10, inset 0 0 60px ${accent}05`,
+        zIndex: 9998,
+        display: 'flex', flexDirection: 'column', overflow: 'hidden',
+        animation: 'doubtbox-in .35s cubic-bezier(.16,1,.3,1) forwards',
       }}
     >
-      {/* Header */}
-      <div
-        style={{
-          background: isCustomer
-            ? 'linear-gradient(135deg, #8B5CF6 0%, #6D28D9 100%)'
-            : 'linear-gradient(135deg, #0F172A 0%, #1E293B 100%)',
-          color: 'white', padding: '16px 20px',
-          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <Sparkles size={18} />
-          <span style={{ fontWeight: 600 }}>{title}</span>
+      {/* Header — glassy strip */}
+      <div style={{
+        padding: '14px 18px',
+        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        borderBottom: `1px solid ${accent}20`,
+        background: `${accent}08`,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <Sparkles size={16} color={accent} />
+          <span style={{ fontWeight: 700, fontSize: '.88rem', color: '#F1F5F9' }}>{title}</span>
         </div>
         <button
           onClick={() => setIsOpen(false)}
           aria-label={t('assistant.close', 'Close')}
-          style={{ background: 'transparent', border: 'none', color: 'white', cursor: 'pointer', padding: '4px' }}
+          style={{ background: 'none', border: 'none', color: '#64748B', cursor: 'pointer', padding: '4px', transition: 'color .15s' }}
+          onMouseEnter={e => (e.currentTarget.style.color = '#F1F5F9')}
+          onMouseLeave={e => (e.currentTarget.style.color = '#64748B')}
         >
-          <X size={18} />
+          <X size={16} />
         </button>
       </div>
 
       {/* Messages */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px', backgroundColor: '#F8FAFC' }}>
+      <div style={{
+        flex: 1, overflowY: 'auto', padding: '16px',
+        display: 'flex', flexDirection: 'column', gap: '12px',
+        scrollbarWidth: 'thin',
+        scrollbarColor: `${accent}30 transparent`,
+      }}>
         {messages.length === 0 && (
-          <div style={{ textAlign: 'center', color: '#64748B', marginTop: '40px', fontSize: '0.9rem' }}>
+          <div style={{
+            textAlign: 'center', color: '#94A3B8', marginTop: '30px', fontSize: '.88rem',
+            padding: '0 12px', lineHeight: 1.5,
+          }}>
             {isCustomer
               ? t('assistant.greetCustomer', "Hi there! I'm your friendly guide. How can I help you today?")
               : t('assistant.greetAdmin', "Hello. I'm ready to assist with case summaries and verifications.")}
@@ -196,30 +210,34 @@ export const AssistantChatPanel: React.FC = () => {
 
         {messages.map(msg => (
           <div key={msg.id} style={{ display: 'flex', flexDirection: 'column', alignItems: msg.sender === 'user' ? 'flex-end' : 'flex-start' }}>
-            <div style={{ display: 'flex', flexDirection: msg.sender === 'user' ? 'row-reverse' : 'row', gap: '8px', alignItems: 'flex-end', maxWidth: '85%' }}>
+            <div style={{ display: 'flex', flexDirection: msg.sender === 'user' ? 'row-reverse' : 'row', gap: '8px', alignItems: 'flex-end', maxWidth: '88%' }}>
               <div style={{
-                width: '28px', height: '28px', borderRadius: '50%', flexShrink: 0,
-                backgroundColor: msg.sender === 'user' ? '#E2E8F0' : primaryColor,
-                color: msg.sender === 'user' ? '#475569' : 'white',
+                width: '26px', height: '26px', borderRadius: '50%', flexShrink: 0,
+                background: msg.sender === 'user' ? '#334155' : `${accent}25`,
+                color: msg.sender === 'user' ? '#CBD5E1' : accent,
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
+                border: `1px solid ${msg.sender === 'user' ? '#475569' : accent + '40'}`,
               }}>
-                {msg.sender === 'user' ? <User size={14} /> : <Bot size={14} />}
+                {msg.sender === 'user' ? <User size={13} /> : <Bot size={13} />}
               </div>
 
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: msg.sender === 'user' ? 'flex-end' : 'flex-start' }}>
                 <div style={{
-                  padding: '10px 14px', borderRadius: '16px',
-                  borderBottomRightRadius: msg.sender === 'user' ? '4px' : '16px',
-                  borderBottomLeftRadius: msg.sender === 'assistant' ? '4px' : '16px',
-                  backgroundColor: msg.isError ? '#FEF2F2' : (msg.sender === 'user' ? primaryColor : 'white'),
-                  color: msg.isError ? '#B91C1C' : (msg.sender === 'user' ? 'white' : '#1E293B'),
-                  border: msg.sender === 'assistant' ? `1px solid ${msg.isError ? '#FECACA' : '#E2E8F0'}` : 'none',
-                  fontSize: '0.9rem', lineHeight: 1.45, whiteSpace: 'pre-wrap',
+                  padding: '10px 14px', borderRadius: '14px',
+                  borderBottomRightRadius: msg.sender === 'user' ? '4px' : '14px',
+                  borderBottomLeftRadius: msg.sender === 'assistant' ? '4px' : '14px',
+                  backgroundColor: msg.isError ? 'rgba(239,68,68,.12)'
+                    : msg.sender === 'user' ? `${accentDim}40`
+                    : 'rgba(255,255,255,.06)',
+                  color: msg.isError ? '#FCA5A5' : '#E2E8F0',
+                  border: `1px solid ${msg.isError ? 'rgba(239,68,68,.25)' : msg.sender === 'user' ? `${accent}30` : 'rgba(255,255,255,.08)'}`,
+                  fontSize: '.87rem', lineHeight: 1.5, whiteSpace: 'pre-wrap',
+                  fontWeight: 500,
                 }}>
                   {msg.text}
                 </div>
-                <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginTop: '4px' }}>
-                  <span style={{ fontSize: '0.7rem', color: '#94A3B8' }}>{msg.timestamp}</span>
+                <div style={{ display: 'flex', gap: '6px', alignItems: 'center', marginTop: '3px' }}>
+                  <span style={{ fontSize: '0.65rem', color: '#64748B' }}>{msg.timestamp}</span>
                   {msg.sender === 'assistant' && sourceBadge(msg.source)}
                 </div>
               </div>
@@ -228,42 +246,45 @@ export const AssistantChatPanel: React.FC = () => {
             {/* Human-in-the-loop: supervised action awaiting the officer's go-ahead */}
             {msg.pendingApproval && (
               <div style={{
-                marginTop: '10px', marginLeft: '36px', maxWidth: '85%',
-                background: '#FFFBEB', border: '1px solid #FDE68A', borderRadius: '12px', padding: '12px 14px',
+                marginTop: '8px', marginLeft: '34px', maxWidth: '88%',
+                background: 'rgba(251,191,36,.08)', border: '1px solid rgba(251,191,36,.25)',
+                borderRadius: '12px', padding: '10px 12px',
               }}>
-                <div style={{ fontSize: '0.72rem', fontWeight: 700, color: '#B45309', textTransform: 'uppercase', letterSpacing: '0.03em', marginBottom: '4px' }}>
+                <div style={{ fontSize: '0.68rem', fontWeight: 800, color: '#FBBF24', textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: '4px' }}>
                   {t('assistant.approvalNeeded', 'Approval needed')}
                 </div>
-                <div style={{ fontSize: '0.85rem', color: '#78350F', fontWeight: 600 }}>
+                <div style={{ fontSize: '.82rem', color: '#FDE68A', fontWeight: 700 }}>
                   {msg.pendingApproval.actionLabel}
                 </div>
                 {msg.pendingApproval.summary && (
-                  <div style={{ fontSize: '0.8rem', color: '#92400E', marginTop: '4px', lineHeight: 1.4 }}>
+                  <div style={{ fontSize: '.78rem', color: '#FCD34D', marginTop: '4px', lineHeight: 1.4, opacity: .85 }}>
                     {msg.pendingApproval.summary}
                   </div>
                 )}
-                <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
+                <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
                   <button
                     onClick={() => handleApprove(true, msg)}
                     disabled={isThinking}
                     style={{
-                      flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
-                      padding: '8px 10px', borderRadius: '8px', border: 'none', cursor: isThinking ? 'not-allowed' : 'pointer',
-                      backgroundColor: '#16A34A', color: 'white', fontSize: '0.82rem', fontWeight: 600, opacity: isThinking ? 0.6 : 1,
+                      flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '5px',
+                      padding: '7px 10px', borderRadius: '8px', border: 'none', cursor: isThinking ? 'not-allowed' : 'pointer',
+                      backgroundColor: '#22C55E', color: '#052E16', fontSize: '.8rem', fontWeight: 700, opacity: isThinking ? 0.5 : 1,
+                      transition: 'opacity .15s',
                     }}
                   >
-                    <Check size={14} /> {t('assistant.approve', 'Approve')}
+                    <Check size={13} /> {t('assistant.approve', 'Approve')}
                   </button>
                   <button
                     onClick={() => handleApprove(false, msg)}
                     disabled={isThinking}
                     style={{
-                      flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
-                      padding: '8px 10px', borderRadius: '8px', border: '1px solid #FCA5A5', cursor: isThinking ? 'not-allowed' : 'pointer',
-                      backgroundColor: 'white', color: '#DC2626', fontSize: '0.82rem', fontWeight: 600, opacity: isThinking ? 0.6 : 1,
+                      flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '5px',
+                      padding: '7px 10px', borderRadius: '8px', border: '1px solid rgba(239,68,68,.4)', cursor: isThinking ? 'not-allowed' : 'pointer',
+                      backgroundColor: 'transparent', color: '#FCA5A5', fontSize: '.8rem', fontWeight: 700, opacity: isThinking ? 0.5 : 1,
+                      transition: 'opacity .15s',
                     }}
                   >
-                    <Ban size={14} /> {t('assistant.reject', 'Reject')}
+                    <Ban size={13} /> {t('assistant.reject', 'Reject')}
                   </button>
                 </div>
               </div>
@@ -273,10 +294,18 @@ export const AssistantChatPanel: React.FC = () => {
 
         {isThinking && (
           <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-end' }}>
-            <div style={{ width: '28px', height: '28px', borderRadius: '50%', backgroundColor: primaryColor, color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <Bot size={14} />
+            <div style={{
+              width: '26px', height: '26px', borderRadius: '50%',
+              background: `${accent}25`, color: accent,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              border: `1px solid ${accent}40`,
+            }}>
+              <Bot size={13} />
             </div>
-            <div style={{ padding: '12px 16px', borderRadius: '16px', borderBottomLeftRadius: '4px', backgroundColor: 'white', border: '1px solid #E2E8F0' }}>
+            <div style={{
+              padding: '12px 16px', borderRadius: '14px', borderBottomLeftRadius: '4px',
+              background: 'rgba(255,255,255,.06)', border: '1px solid rgba(255,255,255,.08)',
+            }}>
               <div className="typing-indicator"><span></span><span></span><span></span></div>
             </div>
           </div>
@@ -284,40 +313,75 @@ export const AssistantChatPanel: React.FC = () => {
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Input */}
-      <div style={{ padding: '16px', backgroundColor: 'white', borderTop: '1px solid #E2E8F0' }}>
-        <form onSubmit={handleSend} style={{ display: 'flex', gap: '8px' }}>
+      {/* Input — pill style "what's your doubt mate?" */}
+      <div style={{
+        padding: '12px 14px',
+        borderTop: `1px solid ${accent}15`,
+        background: `${accent}05`,
+      }}>
+        <form onSubmit={handleSend} style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
           <input
             type="text"
             value={inputText}
             onChange={(e) => setInputText(e.target.value)}
-            placeholder={t('assistant.placeholder', 'Type your message...')}
-            style={{ flex: 1, padding: '10px 14px', borderRadius: '24px', border: '1px solid #CBD5E1', outline: 'none', fontSize: '0.9rem' }}
+            placeholder={isCustomer
+              ? t('assistant.placeholder', "What's your doubt, mate?...")
+              : t('assistant.placeholder', 'Ask me anything...')}
+            style={{
+              flex: 1, padding: '10px 16px',
+              borderRadius: '24px',
+              border: `1.5px solid ${accent}30`,
+              background: 'rgba(255,255,255,.05)',
+              color: '#F1F5F9',
+              fontSize: '.88rem', fontWeight: 500,
+              outline: 'none',
+              transition: 'border-color .2s, box-shadow .2s',
+            }}
+            onFocus={(e) => {
+              e.target.style.borderColor = `${accent}80`;
+              e.target.style.boxShadow = `0 0 0 3px ${accent}15`;
+            }}
+            onBlur={(e) => {
+              e.target.style.borderColor = `${accent}30`;
+              e.target.style.boxShadow = 'none';
+            }}
           />
           <button
             type="submit"
             disabled={!inputText.trim() || isThinking}
             aria-label={t('assistant.send', 'Send')}
             style={{
-              width: '40px', height: '40px', borderRadius: '50%',
-              backgroundColor: inputText.trim() && !isThinking ? primaryColor : '#CBD5E1',
-              color: 'white', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center',
-              cursor: inputText.trim() && !isThinking ? 'pointer' : 'not-allowed', transition: 'background-color 0.2s',
+              width: '38px', height: '38px', borderRadius: '50%',
+              background: inputText.trim() && !isThinking
+                ? `linear-gradient(135deg, ${accent}, ${accentDim})`
+                : '#334155',
+              color: 'white', border: 'none',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              cursor: inputText.trim() && !isThinking ? 'pointer' : 'not-allowed',
+              transition: 'background .2s, transform .15s',
+              flexShrink: 0,
             }}
           >
-            <Send size={16} style={{ marginLeft: rtl ? 0 : '2px', marginRight: rtl ? '2px' : 0 }} />
+            <Send size={15} style={{ marginLeft: rtl ? 0 : '2px', marginRight: rtl ? '2px' : 0 }} />
           </button>
         </form>
-        <div style={{ textAlign: 'center', marginTop: '8px', fontSize: '0.65rem', color: '#CBD5E1' }}>
+        <div style={{
+          textAlign: 'center', marginTop: '8px',
+          fontSize: '0.6rem', color: '#475569',
+        }}>
           {t('assistant.poweredBy', 'Powered by ServiceNow AI')}
           <span style={{ color: accent }}> • Bridge360</span>
         </div>
       </div>
 
       <style>{`
+        @keyframes doubtbox-in {
+          0% { opacity: 0; transform: translateY(20px) scale(.95); }
+          100% { opacity: 1; transform: translateY(0) scale(1); }
+        }
         .typing-indicator { display: flex; gap: 4px; }
         .typing-indicator span {
-          width: 6px; height: 6px; background-color: #94A3B8; border-radius: 50%;
+          width: 6px; height: 6px; background-color: ${accent}; border-radius: 50%;
           animation: bounce 1.4s infinite ease-in-out both;
         }
         .typing-indicator span:nth-child(1) { animation-delay: -0.32s; }

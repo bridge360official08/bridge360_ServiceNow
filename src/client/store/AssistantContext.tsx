@@ -44,7 +44,8 @@ export type MascotAnimation =
   | 'wave'
   | 'nod'
   | 'point'
-  | 'celebrate';
+  | 'celebrate'
+  | 'work';
 
 export interface AssistantActivity {
   kind: 'input' | 'action' | 'navigation' | 'error';
@@ -85,7 +86,24 @@ export interface RunResult {
   raw?: any;
 }
 
+export type MascotMode = 'docked' | 'active' | 'moving';
+
 type ActionHandler = (actionType: string, payload?: any) => void;
+
+/**
+ * A live admin task the Intern is working on, surfaced as the holographic
+ * "Work Console" timeline beside the mascot. Steps update in place as the
+ * (parent + sub-)agents progress; `needsInput` pauses for officer intervention.
+ */
+export interface AgentRun {
+  id: string;
+  title: string;              // e.g. "Summarise 7 new registrations"
+  status: AgentRunStatus;     // idle | running | completed | error
+  stages: RunStage[];         // the checklist / timeline
+  startedAt: number;
+  needsInput?: { prompt: string } | null;  // when a step needs the admin
+  resultSummary?: string;     // short line shown when completed
+}
 
 interface AssistantContextType {
   isOpen: boolean;
@@ -151,9 +169,31 @@ interface AssistantContextType {
   pendingPrompt: { text: string; key: number } | null;
   dispatchToAssistant: (text: string) => void;
   clearPendingPrompt: () => void;
+
+  /** Hologram mascot visibility — user toggle, persisted in localStorage. */
+  assistantEnabled: boolean;
+  setAssistantEnabled: (v: boolean) => void;
+
+  /** Mascot dock state: docked (in hologram), active (speaking/guiding), moving. */
+  mascotMode: MascotMode;
+  setMascotMode: (m: MascotMode) => void;
+
+  /** Live admin tasks the Intern is working on (drives the Work Console). */
+  agentRuns: AgentRun[];
+  addAgentRun: (run: AgentRun) => void;
+  updateAgentRun: (id: string, patch: Partial<AgentRun>) => void;
+  removeAgentRun: (id: string) => void;
 }
 
 const AssistantContext = createContext<AssistantContextType | undefined>(undefined);
+
+/** Safe localStorage wrapper. */
+const readLS = (key: string, fallback: boolean): boolean => {
+  try { const v = localStorage.getItem(key); return v === null ? fallback : v === 'true'; } catch { return fallback; }
+};
+const writeLS = (key: string, v: boolean) => {
+  try { localStorage.setItem(key, String(v)); } catch { /* quota / private mode */ }
+};
 
 export const AssistantProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [isOpen, setIsOpen] = useState(false);
@@ -171,6 +211,12 @@ export const AssistantProvider: React.FC<{ children: ReactNode }> = ({ children 
   const [agentTarget, setAgentTarget] = useState<AgentTarget | null>(null);
   const [pendingPrompt, setPendingPrompt] = useState<{ text: string; key: number } | null>(null);
   const promptKeyRef = useRef(0);
+
+  // Increment 2 state
+  const [assistantEnabled, setAssistantEnabledRaw] = useState(() => readLS('b360_assistant', true));
+  const setAssistantEnabled = useCallback((v: boolean) => { setAssistantEnabledRaw(v); writeLS('b360_assistant', v); }, []);
+  const [mascotMode, setMascotMode] = useState<MascotMode>('docked');
+  const [agentRuns, setAgentRuns] = useState<AgentRun[]>([]);
 
   // Multi-registrant action handlers live in a ref (no re-render on register).
   const handlersRef = useRef<Set<ActionHandler>>(new Set());
@@ -241,6 +287,16 @@ export const AssistantProvider: React.FC<{ children: ReactNode }> = ({ children 
 
   const clearPendingPrompt = useCallback(() => setPendingPrompt(null), []);
 
+  const addAgentRun = useCallback((run: AgentRun) => {
+    setAgentRuns(prev => [...prev, run]);
+  }, []);
+  const updateAgentRun = useCallback((id: string, patch: Partial<AgentRun>) => {
+    setAgentRuns(prev => prev.map(r => r.id === id ? { ...r, ...patch } : r));
+  }, []);
+  const removeAgentRun = useCallback((id: string) => {
+    setAgentRuns(prev => prev.filter(r => r.id !== id));
+  }, []);
+
   return (
     <AssistantContext.Provider
       value={{
@@ -278,6 +334,14 @@ export const AssistantProvider: React.FC<{ children: ReactNode }> = ({ children 
         pendingPrompt,
         dispatchToAssistant,
         clearPendingPrompt,
+        assistantEnabled,
+        setAssistantEnabled,
+        mascotMode,
+        setMascotMode,
+        agentRuns,
+        addAgentRun,
+        updateAgentRun,
+        removeAgentRun,
       }}
     >
       {children}
