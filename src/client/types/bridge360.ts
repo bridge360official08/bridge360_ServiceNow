@@ -24,6 +24,7 @@ export interface OCRExtractedField {
   confidence: number;
   category: ExtractionCategory;
   verified: boolean;
+  source?: string;
 }
 
 export interface DocumentRecord {

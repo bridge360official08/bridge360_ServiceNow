@@ -44,7 +44,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchCustomer, onLa
     { icon: '🛂', title: 'Smart Registration', desc: 'AI-assisted family intake with OCR document extraction and real-time validation across all family members.' },
     { icon: '📋', title: 'Case Management', desc: 'Full lifecycle case tracking from intake through resettlement with automated ServiceNow workflows.' },
     { icon: '🤝', title: 'Partner Referrals', desc: 'Seamless inter-agency referrals to NGOs, health clinics, legal aid, and housing with live email alerts.' },
-    { icon: '🤖', title: 'AI Verification Suite', desc: 'Multi-agent AI: Triage Agent, Document Analyst, Risk Assessment, and Decision Drafter agents.' },
+    { icon: '🤖', title: 'AI-Assisted Case Review', desc: 'Six advisory checks for triage, document text matching, completeness, support planning, record integrity, and decision drafting. Officers remain in control of every decision.' },
     { icon: '📧', title: 'Real-time Notifications', desc: 'Instant email and portal notifications for every case update, referral, appointment, and status change.' },
     { icon: '🔒', title: 'Secure OTP Access', desc: 'Passwordless customer portal with email OTP for secure, frictionless document tracking and communication.' },
   ];
@@ -381,4 +381,3 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchCustomer, onLa
     </div>
   );
 };
-

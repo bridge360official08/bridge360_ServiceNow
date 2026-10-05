@@ -1,11 +1,7 @@
 // AgentOrchestrator.ts
-// Deterministic, rule-based multi-agent pipeline used for INSTANT UI feedback
-// in the admin workspace. It runs four "agents" (triage, document analysis,
-// risk assessment, decision drafting) with no network/LLM dependency, then
-// best-effort writes the outcome back to ServiceNow.
+// Deterministic, advisory-only multi-agent pipeline used for instant admin UI feedback.
 
 import { FamilyRecord, DocumentRecord } from '../types/bridge360';
-import { snUpdateTableRecord } from './snApi';
 
 export interface AgentResult {
   triage: {
@@ -14,9 +10,13 @@ export interface AgentResult {
     notes: string;
   };
   docAnalysis: {
-    verifiedCount: number;
+    initialMatchCount: number;
     discrepancies: string[];
-    status: 'Verified' | 'Needs Review' | 'Flagged';
+    status: 'Initial match only' | 'Needs Review' | 'Possible mismatch';
+  };
+  completenessReview: {
+    missingItems: string[];
+    status: 'Ready for officer review' | 'Needs information';
   };
   riskAssessment: {
     score: 'Low' | 'Medium' | 'High' | 'Critical';
@@ -24,109 +24,62 @@ export interface AgentResult {
   };
   // Draft recommendation + justification produced from the document analysis.
   decisionDraft: {
-    recommendation: 'Approved' | 'Requires Clarification' | 'Rejected';
+    recommendation: 'Officer review recommended' | 'Clarification recommended';
     justification: string;
+  };
+  supportPlan: {
+    recommendations: string[];
   };
 }
 
-/** Age in whole years from an ISO/date string; 0 when unparseable. */
-function ageFromDob(dob?: string): number {
-  if (!dob) return 0;
-  const d = new Date(dob);
-  if (isNaN(d.getTime())) return 0;
-  const now = new Date();
-  let age = now.getFullYear() - d.getFullYear();
-  const m = now.getMonth() - d.getMonth();
-  if (m < 0 || (m === 0 && now.getDate() < d.getDate())) age--;
-  return age;
-}
-
 export class AgentOrchestrator {
-  /**
-   * Run the full pipeline for one family, then write the results back to the
-   * ServiceNow family record (best-effort; a failed write only warns).
-   */
+  /** Evaluate a family without changing its records or making a decision. */
   public static evaluate(
     family: FamilyRecord,
     documents: DocumentRecord[] = [],
-    membersCount: number = 1,
   ): AgentResult {
     const triage = AgentOrchestrator.runTriageAgent(family);
     const docAnalysis = AgentOrchestrator.runDocAnalystAgent(family, documents);
-    const riskAssessment = AgentOrchestrator.runRiskAssessmentAgent(family, membersCount);
-    const decisionDraft = AgentOrchestrator.runDecisionDraftAgent(docAnalysis);
-    return { triage, docAnalysis, riskAssessment, decisionDraft };
+    const completenessReview = AgentOrchestrator.runCompletenessAgent(family, documents);
+    const riskAssessment = AgentOrchestrator.runRiskAssessmentAgent(docAnalysis, completenessReview);
+    const decisionDraft = AgentOrchestrator.runDecisionDraftAgent(docAnalysis, completenessReview);
+    const supportPlan = AgentOrchestrator.runSupportPlanningAgent(family);
+    return { triage, docAnalysis, completenessReview, riskAssessment, decisionDraft, supportPlan };
   }
 
   static async runWorkflow(
     family: FamilyRecord,
     documents: DocumentRecord[],
-    membersCount: number,
   ): Promise<AgentResult> {
-    const triage = AgentOrchestrator.runTriageAgent(family);
-    const docAnalysis = AgentOrchestrator.runDocAnalystAgent(family, documents);
-    const riskAssessment = AgentOrchestrator.runRiskAssessmentAgent(family, membersCount);
-    const decisionDraft = AgentOrchestrator.runDecisionDraftAgent(docAnalysis);
-
-    try {
-      await snUpdateTableRecord('u_bridge360_family', (family as any).sys_id || family.id, {
-        u_priority: triage.priority,
-        u_assigned_officer: triage.assignedOfficer,
-        u_verification_status: docAnalysis.status,
-        u_registration_status: decisionDraft.recommendation,
-      });
-    } catch (e) {
-      console.warn('AgentOrchestrator: failed to write results back to ServiceNow:', e);
-    }
-
-    return { triage, docAnalysis, riskAssessment, decisionDraft };
+    return AgentOrchestrator.evaluate(family, documents);
   }
 
-  /** Route the case to an officer by country of origin; interpreter escalates. */
+  /** Report the current assignment without automatically routing or reprioritizing. */
   private static runTriageAgent(family: FamilyRecord): AgentResult['triage'] {
-    const country = (family.countryOfOrigin || '').toLowerCase();
-    let assignedOfficer = 'Sarah Jenkins';
-    let priority: AgentResult['triage']['priority'] = 'Medium';
-    let notes: string;
-
-    if (country.includes('syria') || country.includes('iraq')) {
-      assignedOfficer = 'Sarah Jenkins';
-      priority = 'High';
-      notes = `High-conflict region (${family.countryOfOrigin}) — routed to regional specialist ${assignedOfficer}.`;
-    } else if (country.includes('venezuela') || country.includes('colombia')) {
-      assignedOfficer = 'Carlos Ruiz';
-      priority = 'Medium';
-      notes = `Latin America caseload — routed to ${assignedOfficer}.`;
-    } else if (country.includes('ukraine')) {
-      assignedOfficer = 'Yelena Kozlov';
-      priority = 'High';
-      notes = `Eastern Europe caseload — routed to ${assignedOfficer}.`;
-    } else {
-      assignedOfficer = 'Sarah Jenkins';
-      priority = 'Medium';
-      notes = `General intake — routed to duty officer ${assignedOfficer}.`;
-    }
-
-    if (family.needsInterpreter && priority !== 'High') {
-      priority = 'High';
-      notes += ' Interpreter required — escalated to High priority.';
-    }
-
+    const assignedOfficer = family.assignedOfficer || 'Officer assignment required';
+    const priorityByValue: Record<string, AgentResult['triage']['priority']> = {
+      low: 'Low',
+      normal: 'Medium',
+      medium: 'Medium',
+      high: 'High',
+      critical: 'Critical',
+    };
+    const priority = priorityByValue[family.priority?.toLowerCase() || ''] || 'Medium';
+    const notes = family.assignedOfficer
+      ? `Current officer assignment is ${family.assignedOfficer}; this agent does not reassign cases.`
+      : 'No officer was assigned by this advisory review. An authorized officer can select the assignee.';
     return { assignedOfficer, priority, notes };
   }
 
-  /**
-   * Compare each document's extracted/OCR text against the family surname.
-   * A document whose text does not contain the surname is flagged; the flag
-   * string embeds the documentType so consumers can match it to the record.
-   */
+  /** Compare extracted text for an initial name match; this is not identity verification. */
   private static runDocAnalystAgent(
     family: FamilyRecord,
     documents: DocumentRecord[],
   ): AgentResult['docAnalysis'] {
     const surname = (family.headOfFamily?.lastName || family.familyName || '').trim().toLowerCase();
     const discrepancies: string[] = [];
-    let verifiedCount = 0;
+    let matchedCount = 0;
+    let possibleMismatch = false;
 
     for (const doc of documents) {
       const haystack = [
@@ -136,60 +89,102 @@ export class AgentOrchestrator {
         .join(' ')
         .toLowerCase();
 
-      if (surname && haystack.includes(surname)) {
-        verifiedCount++;
+      if (!surname || !haystack) {
+        discrepancies.push(`${doc.documentType}: applicant name or readable extracted text is unavailable for comparison.`);
+      } else if (haystack.includes(surname)) {
+        matchedCount++;
       } else {
+        possibleMismatch = true;
         discrepancies.push(
-          `${doc.documentType}: family name "${family.headOfFamily?.lastName || family.familyName}" not found in extracted text.`,
+          `${doc.documentType}: applicant family name was not found in extracted text; officer inspection required.`,
         );
       }
     }
 
-    const status: AgentResult['docAnalysis']['status'] =
-      discrepancies.length === 0 ? 'Verified' : 'Flagged';
+    const status: AgentResult['docAnalysis']['status'] = possibleMismatch
+      ? 'Possible mismatch'
+      : discrepancies.length || !documents.length
+        ? 'Needs Review'
+        : 'Initial match only';
 
-    return { verifiedCount, discrepancies, status };
+    return { initialMatchCount: matchedCount, discrepancies, status };
   }
 
-  /** Score risk from household size, elderly members, and interpreter need. */
-  private static runRiskAssessmentAgent(
+  private static runCompletenessAgent(
     family: FamilyRecord,
-    membersCount: number,
+    documents: DocumentRecord[],
+  ): AgentResult['completenessReview'] {
+    const missingItems: string[] = [];
+    const head = family.headOfFamily;
+    if (!head?.firstName?.trim()) missingItems.push('Applicant first name');
+    if (!head?.lastName?.trim()) missingItems.push('Applicant family name');
+    if (!head?.dateOfBirth?.trim()) missingItems.push('Applicant date of birth');
+    if (documents.length === 0) missingItems.push('Identity document');
+    if ((family.members?.length || 0) + 1 < (family.householdSize || 1)) {
+      missingItems.push('Household member details');
+    }
+    return {
+      missingItems,
+      status: missingItems.length ? 'Needs information' : 'Ready for officer review',
+    };
+  }
+
+  private static runSupportPlanningAgent(family: FamilyRecord): AgentResult['supportPlan'] {
+    const recommendations: string[] = [];
+    if (family.needsInterpreter) {
+      recommendations.push(
+        family.primaryLanguage
+          ? `Confirm interpreter availability for the recorded language: ${family.primaryLanguage}.`
+          : 'Confirm the applicant’s preferred language and arrange interpreter support if needed.',
+      );
+    }
+    if (family.householdSize > 1) {
+      recommendations.push('Check that each household member has the required identity evidence and support needs recorded.');
+    }
+    return { recommendations };
+  }
+
+  /** Assess record integrity without scoring personal or protected characteristics. */
+  private static runRiskAssessmentAgent(
+    docAnalysis: AgentResult['docAnalysis'],
+    completenessReview: AgentResult['completenessReview'],
   ): AgentResult['riskAssessment'] {
     const factors: string[] = [];
     let score: AgentResult['riskAssessment']['score'] = 'Low';
-
-    if (membersCount > 5) {
+    if (completenessReview.missingItems.length) {
       score = 'Medium';
-      factors.push(`Large household (${membersCount} members) increases coordination complexity.`);
+      factors.push(`Record completeness needs review: ${completenessReview.missingItems.join(', ')}.`);
     }
-
-    const people = [family.headOfFamily, ...(family.members || [])].filter(Boolean);
-    if (people.some(p => ageFromDob(p?.dateOfBirth) > 65)) {
+    if (docAnalysis.status === 'Possible mismatch') {
       score = 'High';
-      factors.push('Elderly member (65+) present — prioritize medical and mobility support.');
-    }
-
-    if (family.needsInterpreter) {
-      factors.push('Language barrier — interpreter required for all interactions.');
+      factors.push('A possible document-to-record mismatch needs human inspection.');
     }
 
     return { score, factors };
   }
 
-  /** Draft an approval recommendation from the document analysis outcome. */
+  /** Draft a non-binding recommendation from the record checks. */
   private static runDecisionDraftAgent(
     docAnalysis: AgentResult['docAnalysis'],
+    completenessReview: AgentResult['completenessReview'],
   ): AgentResult['decisionDraft'] {
-    if (docAnalysis.status !== 'Verified' || docAnalysis.discrepancies.length > 0) {
+    if (docAnalysis.status !== 'Initial match only' || completenessReview.missingItems.length > 0) {
       return {
-        recommendation: 'Requires Clarification',
-        justification: `Document analysis flagged ${docAnalysis.discrepancies.length} discrepancy(ies). Recommend requesting clarification from the applicant before a final decision.`,
+        recommendation: 'Clarification recommended',
+        justification: [
+          docAnalysis.discrepancies.length
+            ? `Document analysis found ${docAnalysis.discrepancies.length} possible mismatch(es).`
+            : '',
+          completenessReview.missingItems.length
+            ? `Missing information: ${completenessReview.missingItems.join(', ')}.`
+            : '',
+          'This is a draft for officer review; it does not verify or reject the application.',
+        ].filter(Boolean).join(' '),
       };
     }
     return {
-      recommendation: 'Approved',
-      justification: `All ${docAnalysis.verifiedCount} document(s) verified against family records with no discrepancies. Case meets the approval criteria.`,
+      recommendation: 'Officer review recommended',
+      justification: `Initial text matching found no obvious discrepancy across ${docAnalysis.initialMatchCount} document(s). This is not identity verification or an approval; an officer must inspect the evidence and decide.`,
     };
   }
 }

@@ -210,4 +210,80 @@ The secondary EasyOCR fallback is **fully integrated and validated**. ServiceNow
 - **Live ServiceNow Safety**: **PASS** (Document Intelligence, AI Agent Studio, and all 26 live REST operations preserved untouched; `sdk:deploy` was not executed).
 - **Hardcoding Audit**: **PASS** (0 country/document-specific extraction branches or schemas).
 
+---
 
+## 7. Security Hardening & Credential Removal Audit
+
+### Hardcoded Password Scrubbing
+- **Files Audited & Scrubbed**:
+  - `src/client/services/snApi.ts`: Removed the hardcoded ServiceNow admin password fallback. API requests now use standard session authorization header or relative endpoint proxying.
+  - `src/client/views/LandingPage.tsx`: Removed plain-text default password values from user-facing documentation / input defaults.
+  - `manage-multilingual.mjs`: Removed hardcoded instance credentials; updated to utilize environment variables (`SN_INSTANCE_URL`, `SN_USERNAME`, `SN_PASSWORD`).
+- **Result**: 0 hardcoded plain-text admin credentials in client bundle or source files.
+
+---
+
+## 8. AI Mascot Visual Redesign & Positioning Architecture
+
+### 8.1 Mascot Visual Redesign
+- **Customer Guide Mascot**: Redrawn with 3D-like gradient shading, distinct hair, headphones, friendly facial features, fingers, boots, and dynamic keyframe micro-animations (floating wave, blinking eyes, talking speech movements, listening cues).
+- **Admin Operations AI Intern**: Redrawn with cybernetic visor, operations badge, floating arms, glowing headset, and task status animations.
+
+### 8.2 Sci-Fi Concentric Hologram & Volumetric Light Projection
+- **3D Tilted Floor Rings Pedestal**: Styled with 3D perspective (`transform: rotateX(72deg) rotateZ(0deg)`) rendering concentric HUD rings:
+  - *Outer Segmented HUD Ring*: Animated clockwise rotation with tick marks.
+  - *Middle Tech Ring*: Animated counter-clockwise rotation with geometric chevron accents.
+  - *Inner Solid Neon Ring & Emitter Core*: Central optical lens emitting intense light glow.
+- **Volumetric Light Rays**: Radiating upward fan beam with layered light streaks (`holo-beam-pulse`), rising light particles (`holo-particle-rise`), and subtle scanlines (`holo-glitch-layer`).
+- **Mascot Color Harmonization**:
+  - **Customer Portal**: Electric Magenta & Neon Purple/Pink (`#D946EF`, `#A855F7`, `#EC4899`).
+  - **Admin Portal**: Cyber Mint & Neon Cyan (`#00F5D4`, `#06B6D4`, `#38BDF8`).
+
+### 8.3 Screen Positioning & Universal Visibility
+-   **Layout Position**: The hologram and hexagonal launcher form a bottom-right dock. Holding and dragging the launcher moves the dock (including the mascot and open chat panel); its viewport-clamped position is saved locally. Hologram visibility is controlled through the chat panel's Assistant Settings.
+- **Universal Rendering**: Removed former exclusions. `<GlobalAssistant />` is rendered unconditionally across all views:
+  - Customer Portal (Home/Landing, Track Application, Registration Engine, Dashboard)
+  - Admin Portal (Command Dashboard, Family 360, Cases, Verification, Referrals, Appointments, Analytics, Settings)
+  - Root Gateway Landing Page (`#/landing`)
+
+---
+
+## 9. Current Status & Next Steps Roadmap
+
+### Current Completed State
+1. **ServiceNow Extraction & DI Pipeline**: Fully functional and validated.
+2. **EasyOCR Fallback**: Integrated and validated.
+3. **Mascot & Hologram UI**: Fully redesigned, color-harmonized, and positioned on bottom-right across all pages.
+4. **Security**: Hardcoded credentials removed.
+5. **Mascot interaction shell**: The reference-aligned dock stacks a custom hexagonal bot-head chat launcher beneath the oval projector ring, with the floating mascot centered in a visible hologram beam above it. The beam visually connects to the launcher; the admin projection uses a softer sky-blue palette, and both mascots have animated boot thrusters. The complete floating dock (projector, beam, mascot, and launcher) scales down while docked and grows slightly while active; the chat panel remains full-size for readability. Hologram visibility is controlled through Assistant Settings in the chat panel. Holding and dragging the launcher repositions the complete dock; the clamped position persists locally and the open chat panel follows it. The Work Console renders supplied `AgentRun` state. Proactive interactions, mascot guidance, and advisory admin-agent work are described in Section 10.
+
+### Pending Next Phase: AI Behavior Engine Implementation
+The behavior-engine implementation is in progress; see Section 10 for what is implemented in this checkpoint and what still needs validation or instance configuration.
+
+---
+## 10. AI Behavior Engine — Current Implementation Checkpoint
+
+### Implemented in the current working tree
+- **Proactive guide and admin assistant**: Observes page interaction events and element labels/metadata locally. It does not collect typed field values. Suggestions are shown after inactivity; prompt text is sent for processing only after the user chooses an action. Customer actions explain or guide; admin actions offer a case/page summary or walkthrough.
+- **Guided focus and movement**: A chosen guide action can move the mascot toward a page target and display a focus outline. Customer navigation is offered only for same-origin links. The launcher supports a double-tap visibility shortcut as well as hold-and-drag repositioning.
+- **Idle animation variety**: Fifteen additional randomized docked gestures are available, with pauses between gestures. The hologram beam height is reduced to partially immerse the mascot.
+- **Six local admin review roles**: Triage (read-only), document initial-text matching, completeness review, explicit support planning, record-integrity review, and decision drafting. These are deterministic local roles, not configured ServiceNow Agent Studio agents.
+- **Advisory-only workflow**: Running the local workflow creates a draft note/timeline entry, not a verification or approval. It does not change case/document status, assign or reprioritize a case, mint identity IDs, or invoke the server write workflow. The ServiceNow workflow endpoint was also changed to read-only. Its document matching is an initial text comparison, not identity verification.
+- **Evidence-linked OCR confidence**: Extracted values retain their local OCR source and confidence where available. Only fields scoring at least 85/100 are prefilled; scores from 50–84 are visibly marked for review, and lower/unscored values remain unfilled and are flagged. The server's previous heuristic confidence constants were removed because they were not calibrated confidence measurements.
+
+### ServiceNow AI capabilities and instance limits
+- Public ServiceNow documentation describes AI Agents/AI Agent Orchestrator, Document Intelligence, AI Search/RAG, Predictive Intelligence, and NLU as possible building blocks. AI Agents and Agent Studio require the applicable plugin, subscription, roles, and supported release; AI Search sources/indexes and Document Intelligence use cases also require configuration.
+- These product descriptions do **not** confirm that the Bridge360 target instance has any plugin, entitlement, role, or supported API enabled. No authenticated instance inspection or live deployment was performed during this checkpoint; the local browser preview made existing API requests that returned HTTP 401. Check release, plugins, and entitlements with an authorized instance administrator/account team before choosing an instance-specific integration.
+- No conversational Agent Studio sub-agent configuration is checked into this repository. The six local code roles are not evidence of configured or licensed ServiceNow agents. The existing generic runtime call is intentionally not used pending confirmation of the supported API and supervised-action controls.
+- An administrator credential appeared in earlier conversation material. It was not used; rotate it if it was real or remains active. Do not place credentials in prompts, source, or handoff documentation.
+- References: [ServiceNow AI Agents](https://www.servicenow.com/docs/bundle/australia-intelligent-experiences/page/administer/ai-agents/concept/exploring-ai-agents.html), [AI Agent security](https://www.servicenow.com/docs/bundle/australia-intelligent-experiences/page/administer/ai-agents/concept/security-for-ai-agents.html), [Document Intelligence](https://www.servicenow.com/docs/bundle/australia-intelligent-experiences/page/administer/document-intelligence/concept/exploring-docintel.html), [AI Search RAG](https://www.servicenow.com/docs/bundle/australia-platform-administration/page/administer/ai-search/concept/ai-search-rag.html), [AI Agent Studio release notes](https://www.servicenow.com/docs/bundle/australia-intelligent-experiences/page/release-notes/now-assist-ai-agents-rn.html).
+
+### Remaining work and validation
+1. Validate dock drag/double-tap behavior, responsive placement, reduced-motion behavior, guide-target alignment through scroll/resize/navigation, and the randomized animations in the browser.
+2. Validate OCR outcomes with representative local and ServiceNow extraction responses, especially missing/unscored confidence, medium-confidence review, and high-confidence prefill.
+3. Once an authorized administrator confirms installed plugins and licensing, map supported ServiceNow agents/tools to specific advisory roles and add explicit human approval before any write-capable action.
+4. Decide whether identity-scoped memory or personal greetings are appropriate only after consent, data minimization, access controls, and a reliable source-of-truth are defined. No personal details are currently invented or inferred.
+5. Run `npx tsc --noEmit`, `npm run build`, and `git diff --check` after the latest edits. Keep unrelated `src/client/App.tsx` changes out of any commit.
+
+---
+*Last Updated: AI Behavior Engine implementation checkpoint*

@@ -2,16 +2,17 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useAssistant, type ChatMessage, type PendingApproval } from '../../store/AssistantContext';
 import { useBridge360 } from '../../store/Bridge360Context';
 import { AssistantService } from '../../services/AssistantService';
-import { Send, X, Bot, User, Sparkles, Check, Ban, ShieldCheck } from 'lucide-react';
+import { Send, X, Bot, User, Sparkles, Check, Ban, ShieldCheck, Settings2, Power } from 'lucide-react';
 
 // Module-level id counter so two messages added in the same millisecond can't collide.
 let _mid = 0;
 const mkId = () => `m-${Date.now()}-${_mid++}`;
 const now = () => new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
-export const AssistantChatPanel: React.FC = () => {
+export const AssistantChatPanel: React.FC<{ position: { right: number; bottom: number } }> = ({ position }) => {
   const {
     isOpen, setIsOpen, portal, screenContext,
+    assistantEnabled, setAssistantEnabled,
     messages, addMessage, updateMessage,
     triggerAction, reportActivity,
     isThinking, setIsThinking, playAnimation,
@@ -22,8 +23,16 @@ export const AssistantChatPanel: React.FC = () => {
   const { language, t } = useBridge360();
 
   const [inputText, setInputText] = useState('');
+  const [assistantSettingsOpen, setAssistantSettingsOpen] = useState(false);
+  const [viewport, setViewport] = useState(() => ({ width: window.innerWidth, height: window.innerHeight }));
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const handledKeyRef = useRef(0);
+
+  useEffect(() => {
+    const updateViewport = () => setViewport({ width: window.innerWidth, height: window.innerHeight });
+    window.addEventListener('resize', updateViewport);
+    return () => window.removeEventListener('resize', updateViewport);
+  }, []);
 
   const scrollToBottom = () => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   useEffect(() => { scrollToBottom(); }, [messages, isThinking]);
@@ -97,6 +106,23 @@ export const AssistantChatPanel: React.FC = () => {
     ? t('assistant.customerTitle', 'Bridge360 Guide')
     : t('assistant.adminTitle', 'AI Intern Assistant');
   const rtl = language === 'ar' || language === 'fa';
+  const isMobile = viewport.width <= 500;
+  const mobileAboveSpace = viewport.height - position.bottom - 318;
+  const mobileBelowSpace = position.bottom + 82;
+  const placePanelAboveDock = mobileAboveSpace >= mobileBelowSpace;
+  const panelStyle: React.CSSProperties = {
+    position: 'fixed',
+    bottom: isMobile
+      ? `${placePanelAboveDock ? position.bottom + 306 : 12}px`
+      : `${Math.min(position.bottom + 75, Math.max(12, viewport.height - 506))}px`,
+    right: isMobile
+      ? '12px'
+      : `${Math.min(position.right + 165, Math.max(12, viewport.width - 382))}px`,
+    width: 'min(370px, calc(100vw - 185px))',
+    maxHeight: isMobile
+      ? `${Math.max(80, Math.min(490, viewport.height - 100, placePanelAboveDock ? mobileAboveSpace : mobileBelowSpace))}px`
+      : 'min(490px, calc(100vh - 100px))',
+  };
 
   const handleSend = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -154,10 +180,10 @@ export const AssistantChatPanel: React.FC = () => {
 
   return (
     <div
+      className="b360-assistant-doubtbox"
       dir={rtl ? 'rtl' : 'ltr'}
       style={{
-        position: 'fixed', bottom: '75px', left: '20px',
-        width: '360px', maxHeight: '480px',
+        ...panelStyle,
         background: panelBg,
         backdropFilter: 'blur(16px)',
         borderRadius: '20px',
@@ -179,15 +205,71 @@ export const AssistantChatPanel: React.FC = () => {
           <Sparkles size={16} color={accent} />
           <span style={{ fontWeight: 700, fontSize: '.88rem', color: '#F1F5F9' }}>{title}</span>
         </div>
-        <button
-          onClick={() => setIsOpen(false)}
-          aria-label={t('assistant.close', 'Close')}
-          style={{ background: 'none', border: 'none', color: '#64748B', cursor: 'pointer', padding: '4px', transition: 'color .15s' }}
-          onMouseEnter={e => (e.currentTarget.style.color = '#F1F5F9')}
-          onMouseLeave={e => (e.currentTarget.style.color = '#64748B')}
-        >
-          <X size={16} />
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', position: 'relative' }}>
+          <button
+            onClick={() => setAssistantSettingsOpen(open => !open)}
+            aria-label={t('assistant.settings', 'Assistant settings')}
+            aria-expanded={assistantSettingsOpen}
+            aria-controls="b360-assistant-settings"
+            title={t('assistant.settings', 'Assistant settings')}
+            style={{
+              display: 'flex', alignItems: 'center', gap: '4px',
+              padding: '6px 8px', borderRadius: '8px',
+              border: `1px solid ${accent}30`, background: `${accent}0A`,
+              color: '#CBD5E1', cursor: 'pointer', fontSize: '.7rem',
+            }}
+          >
+            <Settings2 size={16} />
+            <span>{t('assistant.settings', 'Settings')}</span>
+          </button>
+          {assistantSettingsOpen && (
+            <div
+              id="b360-assistant-settings"
+              role="group"
+              aria-label={t('assistant.settings', 'Assistant settings')}
+              style={{
+                position: 'absolute', top: 'calc(100% + 8px)', right: 0,
+                width: 'min(230px, calc(100vw - 64px))', padding: '12px',
+                borderRadius: '12px', border: `1px solid ${accent}45`,
+                background: 'rgba(10, 15, 28, .98)',
+                boxShadow: '0 12px 32px rgba(0,0,0,.4)',
+                zIndex: 20,
+              }}
+            >
+              <div style={{ fontSize: '.72rem', color: '#94A3B8', marginBottom: '8px' }}>
+                {t('assistant.floatingMascot', 'Floating hologram')}
+              </div>
+              <button
+                onClick={() => setAssistantEnabled(!assistantEnabled)}
+                aria-pressed={assistantEnabled}
+                style={{
+                  width: '100%', display: 'flex', alignItems: 'center', gap: '8px',
+                  padding: '9px 10px', borderRadius: '9px',
+                  border: `1px solid ${accent}35`,
+                  background: `${accent}14`, color: '#F1F5F9',
+                  cursor: 'pointer', textAlign: 'left', fontSize: '.8rem', fontWeight: 600,
+                }}
+              >
+                <Power size={14} color={assistantEnabled ? accent : '#94A3B8'} />
+                {assistantEnabled
+                  ? t('assistant.hideHologram', 'Hide hologram')
+                  : t('assistant.showHologram', 'Show hologram')}
+              </button>
+            </div>
+          )}
+          <button
+            onClick={() => {
+              setAssistantSettingsOpen(false);
+              setIsOpen(false);
+            }}
+            aria-label={t('assistant.close', 'Close')}
+            style={{ background: 'none', border: 'none', color: '#64748B', cursor: 'pointer', padding: '4px', transition: 'color .15s' }}
+            onMouseEnter={e => (e.currentTarget.style.color = '#F1F5F9')}
+            onMouseLeave={e => (e.currentTarget.style.color = '#64748B')}
+          >
+            <X size={16} />
+          </button>
+        </div>
       </div>
 
       {/* Messages */}
@@ -387,6 +469,17 @@ export const AssistantChatPanel: React.FC = () => {
         .typing-indicator span:nth-child(1) { animation-delay: -0.32s; }
         .typing-indicator span:nth-child(2) { animation-delay: -0.16s; }
         @keyframes bounce { 0%, 80%, 100% { transform: scale(0); } 40% { transform: scale(1); } }
+        @media (max-width: 900px) {
+          .b360-assistant-doubtbox {
+            width: min(370px, calc(100vw - 185px)) !important;
+          }
+        }
+        @media (max-width: 500px) {
+          .b360-assistant-doubtbox {
+            right: 12px !important;
+            width: calc(100vw - 40px) !important;
+          }
+        }
       `}</style>
     </div>
   );

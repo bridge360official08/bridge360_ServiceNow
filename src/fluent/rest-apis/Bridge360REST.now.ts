@@ -173,6 +173,7 @@ export const Bridge360REST = RestApi({
 
           // ── 3. Dynamic Field Extraction (Driven by Configured Fields) ──
           var dynamicFields = {};
+          // Heuristic matches are not calibrated confidence scores; do not promote them as certainty.
           var confidence = {};
 
           var textLines = rawText.split(/\\r?\\n/);
@@ -359,7 +360,6 @@ export const Bridge360REST = RestApi({
 
             if (foundValue) {
               dynamicFields[targetField] = foundValue;
-              confidence[targetField] = 90;
             }
           }
 
@@ -435,7 +435,6 @@ export const Bridge360REST = RestApi({
                   extractedIdValue = candidateId;
                   var targetIdField = configuredIdFields[0];
                   dynamicFields[targetIdField] = extractedIdValue;
-                  confidence[targetIdField] = 90;
                   break;
                 }
               }
@@ -465,7 +464,6 @@ export const Bridge360REST = RestApi({
               gVal = gVal.charAt(0).toUpperCase() + gVal.slice(1).toLowerCase();
               for (var tg = 0; tg < configuredGenderFields.length; tg++) {
                 dynamicFields[configuredGenderFields[tg]] = gVal;
-                confidence[configuredGenderFields[tg]] = 90;
                 break;
               }
             }
@@ -543,7 +541,6 @@ export const Bridge360REST = RestApi({
             if (compositeName) {
               for (var tnc = 0; tnc < configuredNameFields.length; tnc++) {
                 dynamicFields[configuredNameFields[tnc]] = compositeName;
-                confidence[configuredNameFields[tnc]] = 90;
                 break;
               }
             } else {
@@ -574,7 +571,6 @@ export const Bridge360REST = RestApi({
                     if (valid && words.length >= 2 && words.length <= 4) {
                       for (var tn = 0; tn < configuredNameFields.length; tn++) {
                         dynamicFields[configuredNameFields[tn]] = candidateName;
-                        confidence[configuredNameFields[tn]] = 85;
                         break;
                       }
                       candidateFound = true;
@@ -595,7 +591,6 @@ export const Bridge360REST = RestApi({
               var efLow = expectedFields[ef].name.toLowerCase();
               if (efLow === 'email' || efLow === 'email_masked' || efLow === 'email_address') {
                 dynamicFields[expectedFields[ef].name] = emailVal;
-                confidence[expectedFields[ef].name] = 95;
                 break;
               }
             }
@@ -627,7 +622,6 @@ export const Bridge360REST = RestApi({
                 phoneVal = candidatePhone;
                 for (var tpf = 0; tpf < configuredPhoneFields.length; tpf++) {
                   dynamicFields[configuredPhoneFields[tpf]] = phoneVal;
-                  confidence[configuredPhoneFields[tpf]] = 90;
                   break;
                 }
               }

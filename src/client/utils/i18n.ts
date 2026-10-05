@@ -177,7 +177,7 @@ export const translations: Partial<Record<SupportedLanguage, Record<string, stri
 
     // Registration Step 1
     'reg.step1.title': 'Instant Document Verification & Auto-Fill',
-    'reg.step1.subtitle': 'Upload your identification document for instant verification. Our system will securely scan your details and auto-fill your application.',
+    'reg.step1.subtitle': 'Upload an identity document to extract details. High-confidence fields may be prefilled; review every extracted value before submitting.',
     'reg.step1.docTypeLabel': 'Select Document Type',
     'reg.step1.dragDrop': 'Click to Choose Document File or Drag & Drop',
     'reg.step1.supports': 'Supports PDF, JPG, PNG, WEBP (Passports, UNHCR IDs, National IDs)',

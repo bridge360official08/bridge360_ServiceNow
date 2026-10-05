@@ -271,6 +271,21 @@ const GESTURE_MS: Partial<Record<MascotAnimation, number>> = {
   nod: 1400,
   point: 1800,
   celebrate: 1900,
+  'idle-wave': 1900,
+  'idle-listen': 2400,
+  'idle-stretch': 2200,
+  'idle-sway': 2400,
+  'idle-twirl': 2000,
+  'idle-bounce': 1800,
+  'idle-kick': 1800,
+  'idle-look': 2200,
+  'idle-salute': 1800,
+  'idle-dance': 2600,
+  'idle-skate': 2600,
+  'idle-cape': 2200,
+  'idle-spin': 2200,
+  'idle-shrug': 1900,
+  'idle-peek': 1900,
 };
 
 const RiggedMascot: React.FC<{
@@ -320,6 +335,7 @@ const RiggedMascot: React.FC<{
         .rig-mouth { transform-origin: center; }
         .rig-torso { transform-origin: center top; }
         .rig-hp-logo { transform-origin: center; }
+        .rig-skateboard, .rig-soundmarks { opacity: 0; }
 
         @keyframes rig-float { 0%,100%{transform:translateY(0) rotate(0)} 50%{transform:translateY(-10px) rotate(.6deg)} }
         @keyframes rig-blink { 0%,92%,100%{transform:scaleY(1)} 96%{transform:scaleY(.08)} }
@@ -335,6 +351,17 @@ const RiggedMascot: React.FC<{
         @keyframes rig-celebrate { 0%,100%{transform:translateY(0) scale(1)} 40%{transform:translateY(-24px) scale(1.05)} 70%{transform:translateY(-6px) scale(1.02)} }
         @keyframes rig-hp { 0%,100%{opacity:.7; transform:scale(1)} 50%{opacity:1; transform:scale(1.15)} }
         @keyframes rig-dot { 0%,80%,100%{transform:scale(.4); opacity:.4} 40%{transform:scale(1); opacity:1} }
+        @keyframes rig-sway { 0%,100%{transform:rotate(-3deg)} 50%{transform:rotate(3deg)} }
+        @keyframes rig-twirl { 0%,100%{transform:rotate(0) translateY(0)} 35%{transform:rotate(-12deg) translateY(-8px)} 70%{transform:rotate(12deg) translateY(-5px)} }
+        @keyframes rig-kick-l { 0%,100%{transform:rotate(-2deg)} 45%{transform:rotate(-22deg)} }
+        @keyframes rig-kick-r { 0%,100%{transform:rotate(2deg)} 55%{transform:rotate(22deg)} }
+        @keyframes rig-look { 0%,100%{transform:translateX(0)} 30%{transform:translateX(8px)} 65%{transform:translateX(-7px)} }
+        @keyframes rig-stretch-l { 0%,100%{transform:rotate(0)} 45%{transform:rotate(28deg)} }
+        @keyframes rig-stretch-r { 0%,100%{transform:rotate(0)} 45%{transform:rotate(-28deg)} }
+        @keyframes rig-peek { 0%,100%{transform:rotate(0) translateX(0)} 45%{transform:rotate(-8deg) translateX(-7px)} }
+        @keyframes rig-skate { 0%,100%{transform:translateX(0) rotate(0)} 30%{transform:translateX(-12px) rotate(-5deg)} 70%{transform:translateX(12px) rotate(5deg)} }
+        @keyframes rig-salute { 0%,100%{transform:rotate(0)} 35%,75%{transform:rotate(-45deg)} }
+        @keyframes rig-shrug { 0%,100%{transform:rotate(0)} 40%,75%{transform:rotate(-14deg)} }
 
         .rig-torso { animation: rig-breathe 4.5s ease-in-out infinite; }
         svg[data-anim="talk"] .rig-mouth { animation: rig-talk .34s ease-in-out infinite; }
@@ -350,11 +377,40 @@ const RiggedMascot: React.FC<{
         .rig-think circle:nth-child(1){ animation: rig-dot 1.3s infinite; }
         .rig-think circle:nth-child(2){ animation: rig-dot 1.3s .2s infinite; }
         .rig-think circle:nth-child(3){ animation: rig-dot 1.3s .4s infinite; }
+        svg[data-anim="idle-wave"] .rig-arm-r { animation: rig-wave .55s ease-in-out 3; }
+        svg[data-anim="idle-listen"] .rig-head { animation: rig-nod .8s ease-in-out 2; }
+        svg[data-anim="idle-listen"] .rig-soundmarks { opacity: 1; animation: rig-glow .8s ease-in-out 3; }
+        svg[data-anim="idle-stretch"] .rig-arm-l { animation: rig-stretch-l .9s ease-in-out 2; }
+        svg[data-anim="idle-stretch"] .rig-arm-r { animation: rig-stretch-r .9s ease-in-out 2; }
+        svg[data-anim="idle-sway"] .rig-root { animation: rig-sway 1.2s ease-in-out 2; }
+        svg[data-anim="idle-twirl"] .rig-root { animation: rig-twirl 1s ease-in-out 2; }
+        svg[data-anim="idle-bounce"] .rig-root { animation: rig-celebrate .8s ease-in-out 2; }
+        svg[data-anim="idle-kick"] .rig-leg-l { animation: rig-kick-l .7s ease-in-out 2; }
+        svg[data-anim="idle-kick"] .rig-leg-r { animation: rig-kick-r .7s ease-in-out 2; }
+        svg[data-anim="idle-look"] .rig-eye-l,
+        svg[data-anim="idle-look"] .rig-eye-r { animation: rig-look .7s ease-in-out 3; }
+        svg[data-anim="idle-salute"] .rig-arm-r { animation: rig-salute .8s ease-in-out 2; }
+        svg[data-anim="idle-dance"] .rig-root { animation: rig-sway .55s ease-in-out 4; }
+        svg[data-anim="idle-dance"] .rig-arm-r,
+        svg[data-anim="idle-dance"] .rig-arm-l { animation: rig-wave .55s ease-in-out 4; }
+        svg[data-anim="idle-skate"] .rig-root { animation: rig-skate .8s ease-in-out 3; }
+        svg[data-anim="idle-skate"] .rig-skateboard { opacity: 1; }
+        svg[data-anim="idle-cape"] .rig-cape { animation: rig-cape .55s ease-in-out 4; }
+        svg[data-anim="idle-spin"] .rig-root { animation: rig-twirl .65s ease-in-out 3; }
+        svg[data-anim="idle-shrug"] .rig-arm-r,
+        svg[data-anim="idle-shrug"] .rig-arm-l { animation: rig-shrug .8s ease-in-out 2; }
+        svg[data-anim="idle-peek"] .rig-head { animation: rig-peek .7s ease-in-out 2; }
       `}</style>
 
       <Defs id={id} skin={s} />
 
       <g className="rig-root">
+        <g className="rig-skateboard" transform="translate(250,612)">
+          <path d="M-112 -8 Q-120 0 -112 8 L112 8 Q120 0 112 -8 Z" fill="#7C3AED" stroke="#FACC15" strokeWidth="5" />
+          <circle cx="-76" cy="13" r="10" fill="#F472B6" stroke="#E2E8F0" strokeWidth="3" />
+          <circle cx="76" cy="13" r="10" fill="#F472B6" stroke="#E2E8F0" strokeWidth="3" />
+          <path d="M-42 -3h84" stroke="#E9D5FF" strokeWidth="3" strokeLinecap="round" />
+        </g>
         {/* Ground shadow */}
         <ellipse cx="250" cy="658" rx="116" ry="13" fill="#0B1120" opacity="0.18" filter={`url(#${id}Soft)`} />
 
@@ -533,6 +589,10 @@ const RiggedMascot: React.FC<{
             <ellipse cx="386" cy="215" rx="18" ry="29" fill="#0A101E" stroke={s.headphoneRim} strokeWidth="2.5" />
             <g transform="translate(386,215)" className="rig-hp-logo">
               {s.logo === 'heart' ? <HeartLogo color="#FFFFFF" scale={0.7} /> : <WaveLogo color={s.headphoneRim} scale={0.85} />}
+            </g>
+            <g className="rig-soundmarks" transform="translate(424,148)" stroke={s.antenna} strokeWidth="5" strokeLinecap="round" fill="none">
+              <path d="M0 0 Q12 -12 0 -24" />
+              <path d="M10 6 Q28 -12 10 -30" />
             </g>
             <ellipse cx="372" cy="190" rx="7" ry="14" fill="#FFFFFF" opacity="0.2" />
           </g>

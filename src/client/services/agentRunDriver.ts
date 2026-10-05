@@ -274,18 +274,21 @@ function normalizeServiceNow(res: SNVerificationAgentResponse): RunResult {
 /** Map the local rule-engine AgentResult into a RunResult (no invented confidence). */
 function mapLocalResult(r: AgentResult, input: VerificationRunInput): RunResult {
   const people = [input.family.headOfFamily, ...(input.family.members || [])].filter(Boolean);
-  const verified = r.docAnalysis.status === 'Verified';
+  const initiallyMatched = r.docAnalysis.status === 'Initial match only';
   const members: RunMemberRow[] = people.map(p => ({
     name: [p.firstName, p.lastName].filter(Boolean).join(' ') || 'Unnamed member',
     role: p.relationshipToHead === 'Self' ? 'Head of family' : p.relationshipToHead,
-    status: verified ? 'Verified' : 'Needs Review',
+    status: initiallyMatched ? 'Initial text match — officer review required' : 'Needs Review',
   }));
 
   const details = [
     { label: 'Assigned officer', value: r.triage.assignedOfficer },
     { label: 'Priority', value: r.triage.priority },
-    { label: 'Risk score', value: r.riskAssessment.score },
-    { label: 'Documents verified', value: String(r.docAnalysis.verifiedCount) },
+    { label: 'Record integrity review', value: r.riskAssessment.score },
+    { label: 'Initial text matches', value: String(r.docAnalysis.initialMatchCount) },
+    { label: 'Completeness', value: r.completenessReview.status },
+    ...r.completenessReview.missingItems.map(item => ({ label: 'Missing information', value: item })),
+    ...r.supportPlan.recommendations.map(item => ({ label: 'Support planning', value: item })),
   ];
   const flags = [...r.docAnalysis.discrepancies, ...r.riskAssessment.factors];
 
@@ -372,10 +375,12 @@ const serviceNowVerificationDriver: RunDriver = {
 };
 
 const LOCAL_STAGES = [
-  { id: 'triage', label: 'Triage — routing & priority' },
-  { id: 'docs', label: 'Document analysis' },
-  { id: 'risk', label: 'Risk assessment' },
-  { id: 'decision', label: 'Drafting decision' },
+  { id: 'triage', label: 'Triage — read-only case context' },
+  { id: 'docs', label: 'Document Analyst — initial text matching' },
+  { id: 'completeness', label: 'Completeness Agent — required information' },
+  { id: 'support', label: 'Support Planner — explicit support needs' },
+  { id: 'risk', label: 'Record Integrity Agent — evidence review' },
+  { id: 'decision', label: 'Decision Drafter — advisory only' },
   { id: 'ready', label: 'Results ready' },
 ];
 
@@ -386,16 +391,24 @@ const localOrchestratorDriver: RunDriver = {
 
     t.active('triage');
     await sleep(320);
-    const result = AgentOrchestrator.evaluate(input.family, input.documents, input.membersCount);
-    t.done('triage', `Assigned to ${result.triage.assignedOfficer} · ${result.triage.priority} priority`);
+    const result = AgentOrchestrator.evaluate(input.family, input.documents);
+    t.done('triage', `Current assignment: ${result.triage.assignedOfficer} · ${result.triage.priority} priority`);
 
     t.active('docs');
     await sleep(360);
-    t.done('docs', `${result.docAnalysis.verifiedCount} document(s) matched · ${result.docAnalysis.discrepancies.length} flag(s)`);
+    t.done('docs', `${result.docAnalysis.initialMatchCount} initial text match(es) · ${result.docAnalysis.discrepancies.length} item(s) to review`);
+
+    t.active('completeness');
+    await sleep(220);
+    t.done('completeness', `${result.completenessReview.status}${result.completenessReview.missingItems.length ? ` · ${result.completenessReview.missingItems.length} item(s)` : ''}`);
+
+    t.active('support');
+    await sleep(220);
+    t.done('support', `${result.supportPlan.recommendations.length} support recommendation(s)`);
 
     t.active('risk');
     await sleep(300);
-    t.done('risk', `Risk level: ${result.riskAssessment.score}`);
+    t.done('risk', `Record integrity review: ${result.riskAssessment.score}`);
 
     t.active('decision');
     await sleep(300);

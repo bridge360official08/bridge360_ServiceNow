@@ -21,7 +21,7 @@ import {
 import { SearchableSelect, SearchableOption } from '../common/SearchableSelect';
 import { useBridge360 } from '../../store/Bridge360Context';
 import { DocumentRecord, FamilyMember, CountryRecord, CountryDocumentRecord, CountryDocumentFieldRecord } from '../../types/bridge360';
-import { extractDocumentFields, ExtractionResult } from '../../services/ocrEngine';
+import { confidenceStatus, extractDocumentFields, ExtractionResult } from '../../services/ocrEngine';
 import { snExtractDocument } from '../../services/snApi';
 import { evidenceFoundationService } from '../../services/evidenceFoundationService';
 import { INITIAL_COUNTRIES, INITIAL_COUNTRY_DOCUMENTS } from '../../store/evidenceReferenceData';
@@ -460,18 +460,34 @@ export const RegistrationEngine: React.FC<Props> = ({ mode = 'customer', onCompl
         }
       });
 
-      const allDynamicFields: Record<string, any> = {};
+      const allDynamicFields: Record<string, string> = {};
+      const fieldEvidence: Record<string, { confidence: number; source: string }> = {};
+      const normalizeFieldName = (name: string) => name.toLowerCase().replace(/[^a-z0-9]/g, '');
+      const addExtractedField = (
+        key: string,
+        rawValue: unknown,
+        confidence: unknown,
+        source: string,
+      ) => {
+        const canonicalKey = configuredNameMap.size > 0
+          ? configuredNameMap.get(key.toLowerCase().trim())
+          : key;
+        if (!canonicalKey || rawValue === undefined || rawValue === null || !String(rawValue).trim()) return;
+        const value = String(rawValue).trim();
+        const normalizedKey = normalizeFieldName(canonicalKey);
+        const numericConfidence = typeof confidence === 'number' && Number.isFinite(confidence)
+          ? confidence
+          : 0;
+        const existingConfidence = fieldEvidence[normalizedKey]?.confidence ?? -1;
+        if (numericConfidence < existingConfidence) return;
+        allDynamicFields[canonicalKey] = value;
+        fieldEvidence[normalizedKey] = { confidence: numericConfidence, source };
+      };
 
       // Ingest from client OCR results (filtered strictly to configured document fields)
       if (localResult?.fields) {
         for (const [k, v] of Object.entries(localResult.fields)) {
-          const val = (v as any)?.value !== undefined ? (v as any).value : v;
-          if (val !== undefined && val !== null && String(val).trim()) {
-            const canonicalKey = configuredNameMap.size > 0 ? configuredNameMap.get(k.toLowerCase()) : k;
-            if (canonicalKey) {
-              allDynamicFields[canonicalKey] = typeof val === 'string' ? val.trim() : val;
-            }
-          }
+          addExtractedField(k, v.value, v.confidence, `Local OCR (${v.source})`);
         }
       }
 
@@ -479,12 +495,12 @@ export const RegistrationEngine: React.FC<Props> = ({ mode = 'customer', onCompl
       if (snDocIntelResult?.fields) {
         for (const [k, v] of Object.entries(snDocIntelResult.fields)) {
           const val = (v as any)?.value !== undefined ? (v as any).value : v;
-          if (val !== undefined && val !== null && String(val).trim()) {
-            const canonicalKey = configuredNameMap.size > 0 ? configuredNameMap.get(k.toLowerCase()) : k;
-            if (canonicalKey) {
-              allDynamicFields[canonicalKey] = typeof val === 'string' ? val.trim() : val;
-            }
-          }
+          addExtractedField(
+            k,
+            val,
+            (v as any)?.confidence ?? snDocIntelResult.confidence?.[k],
+            'ServiceNow Document Intelligence',
+          );
         }
       }
 
@@ -493,7 +509,12 @@ export const RegistrationEngine: React.FC<Props> = ({ mode = 'customer', onCompl
       // and must never contaminate Layer 1 (Document Extraction).
 
       // Store Layer 1 dynamic fields strictly for review and persistence
-      setDocIntelExtractedData(allDynamicFields);
+      setDocIntelExtractedData(Object.fromEntries(
+        Object.entries(allDynamicFields).map(([key, value]) => [
+          key,
+          { value, ...fieldEvidence[normalizeFieldName(key)] },
+        ]),
+      ));
 
       const docId = `DOC-${Date.now()}`;
       const newDoc: DocumentRecord = {
@@ -505,14 +526,18 @@ export const RegistrationEngine: React.FC<Props> = ({ mode = 'customer', onCompl
         fileSize: `${(file.size / (1024 * 1024)).toFixed(2)} MB`,
         uploadedAt: new Date().toLocaleTimeString(),
         verificationStatus: 'Pending',
-        extractedFields: Object.entries(allDynamicFields).map(([k, v]) => ({
+        extractedFields: Object.entries(allDynamicFields).map(([k, v]) => {
+          const evidence = fieldEvidence[normalizeFieldName(k)];
+          const status = confidenceStatus(evidence?.confidence ?? 0);
+          return ({
           key: k,
           label: k.replace(/_/g, ' '),
-          value: String(v),
-          confidence: 90,
-          category: 'IDENTITY' as any,
+          value: v,
+          confidence: evidence?.confidence ?? 0,
+          category: status === 'approved' ? 'High' : status === 'pending' ? 'Medium' : 'Not Found',
           verified: false,
-        })),
+          source: evidence?.source || 'Confidence unavailable',
+        });}),
         extractedJson: JSON.stringify(allDynamicFields),
         ocrRawText: (snDocIntelResult?.diOcrUsed && snDocIntelResult?.rawText) ? snDocIntelResult.rawText : rawExtracted,
         fileDataUrl: fileDataUrl,
@@ -530,110 +555,75 @@ export const RegistrationEngine: React.FC<Props> = ({ mode = 'customer', onCompl
 
       // Map dynamic fields to standard registration form properties where applicable
       // (Preserves existing form auto-fill without limiting dynamic extraction)
+      const autoFillValue = (...aliases: string[]) => {
+        const normalizedAliases = new Set(aliases.map(normalizeFieldName));
+        const match = Object.entries(allDynamicFields).find(([key]) =>
+          normalizedAliases.has(normalizeFieldName(key)),
+        );
+        if (!match) return '';
+        const evidence = fieldEvidence[normalizeFieldName(match[0])];
+        return confidenceStatus(evidence?.confidence ?? 0) === 'approved' ? match[1] : '';
+      };
+
+      const fullName = autoFillValue('full_name');
       const firstName =
-        allDynamicFields.first_name ||
-        allDynamicFields.firstName ||
-        allDynamicFields.given_name ||
-        allDynamicFields.forename ||
-        (allDynamicFields.full_name ? allDynamicFields.full_name.split(' ')[0] : '');
+        autoFillValue('first_name', 'firstName', 'given_name', 'forename') ||
+        (fullName ? fullName.split(' ')[0] : '');
 
       const middleName =
-        allDynamicFields.middle_name ||
-        allDynamicFields.middleName ||
-        (allDynamicFields.full_name && allDynamicFields.full_name.split(' ').length > 2
-          ? allDynamicFields.full_name.split(' ').slice(1, -1).join(' ')
+        autoFillValue('middle_name', 'middleName') ||
+        (fullName && fullName.split(' ').length > 2
+          ? fullName.split(' ').slice(1, -1).join(' ')
           : '');
 
       const lastName =
-        allDynamicFields.last_name ||
-        allDynamicFields.lastName ||
-        allDynamicFields.surname ||
-        allDynamicFields.family_name ||
-        (allDynamicFields.full_name && allDynamicFields.full_name.split(' ').length > 1
-          ? allDynamicFields.full_name.split(' ').slice(-1)[0]
+        autoFillValue('last_name', 'lastName', 'surname', 'family_name') ||
+        (fullName && fullName.split(' ').length > 1
+          ? fullName.split(' ').slice(-1)[0]
           : '');
 
       const rawDateOfBirth =
-        allDynamicFields.date_of_birth ||
-        allDynamicFields.dateOfBirth ||
-        allDynamicFields.dob ||
-        allDynamicFields.birth_date ||
-        snDocIntelResult?.extracted?.dateOfBirth ||
+        autoFillValue('date_of_birth', 'dateOfBirth', 'dob', 'birth_date') ||
         '';
       const dateOfBirth = normalizeToISODate(rawDateOfBirth);
 
-      const gender =
-        allDynamicFields.gender ||
-        allDynamicFields.sex ||
-        'Male';
+      const genderValue = autoFillValue('gender', 'sex');
+      const gender: FamilyMember['gender'] | undefined =
+        genderValue === 'Male' || genderValue === 'Female' || genderValue === 'Other'
+          ? genderValue
+          : undefined;
 
       const nationality =
-        allDynamicFields.nationality ||
-        allDynamicFields.citizenship ||
+        autoFillValue('nationality', 'citizenship') ||
         (selectedCountry ? selectedCountry.nationality || selectedCountry.countryName : '');
 
       const passportNumber =
-        allDynamicFields.passport_number ||
-        allDynamicFields.passport_no ||
-        snDocIntelResult?.extracted?.passportNumber ||
-        '';
+        autoFillValue('passport_number', 'passport_no');
 
       const nationalId =
-        allDynamicFields.national_id ||
-        allDynamicFields.nid_number ||
-        allDynamicFields.aadhaar_number ||
-        allDynamicFields.id_number ||
-        allDynamicFields.unhcr_case_number ||
-        allDynamicFields.family_book_number ||
-        allDynamicFields.document_number ||
-        allDynamicFields.individual_id ||
-        allDynamicFields.tc_kimlik_number ||
-        allDynamicFields.cpf_number ||
-        allDynamicFields.license_number ||
-        allDynamicFields.registration_number ||
-        allDynamicFields.frc_number ||
-        snDocIntelResult?.extracted?.nationalId ||
-        '';
+        autoFillValue('national_id', 'nid_number', 'aadhaar_number', 'id_number', 'unhcr_case_number', 'family_book_number', 'document_number', 'individual_id', 'tc_kimlik_number', 'cpf_number', 'license_number', 'registration_number', 'frc_number');
 
       const emailFromDoc =
-        allDynamicFields.email ||
-        allDynamicFields.email_masked ||
-        snDocIntelResult?.extracted?.email ||
-        '';
+        autoFillValue('email', 'email_masked');
 
       const phoneFromDoc =
-        allDynamicFields.mobile_number ||
-        allDynamicFields.phone ||
-        allDynamicFields.mobile_masked ||
-        allDynamicFields.contact_number ||
-        snDocIntelResult?.extracted?.mobileNumber ||
-        '';
+        autoFillValue('mobile_number', 'phone', 'mobile_masked', 'contact_number');
 
       const addressFromDoc =
-        allDynamicFields.address ||
-        allDynamicFields.residential_address ||
-        snDocIntelResult?.extracted?.address ||
-        '';
+        autoFillValue('address', 'residential_address');
 
       const cityFromDoc =
-        allDynamicFields.city ||
-        allDynamicFields.place_of_birth ||
-        allDynamicFields.registry_location ||
-        snDocIntelResult?.extracted?.city ||
-        '';
+        autoFillValue('city', 'place_of_birth', 'registry_location');
 
       const postalCodeFromDoc =
-        allDynamicFields.postal_code ||
-        allDynamicFields.zip_code ||
-        snDocIntelResult?.extracted?.postalCode ||
-        '';
+        autoFillValue('postal_code', 'zip_code');
 
       setHeadOfFamily(prev => ({
         ...prev,
         firstName: firstName || prev.firstName,
         middleName: middleName || prev.middleName,
         lastName: lastName || prev.lastName,
-        gender: (gender as any) || prev.gender,
+        gender: gender || prev.gender,
         dateOfBirth: dateOfBirth || prev.dateOfBirth,
         nationality: nationality || prev.nationality,
         passportNumber: passportNumber || prev.passportNumber,
@@ -980,7 +970,7 @@ export const RegistrationEngine: React.FC<Props> = ({ mode = 'customer', onCompl
               {t('reg.step1', 'Step 1 — Upload Identification Document')}
             </h3>
             <p style={{ color: 'var(--text-sub)', fontSize: '0.92rem', marginTop: '6px', lineHeight: 1.5 }}>
-              {t('reg.step1.subtitle', 'Upload your identification document for instant verification. Our system will securely scan your details and auto-fill your application.')}
+              {t('reg.step1.subtitle', 'Upload an identity document to extract details. High-confidence fields may be prefilled; review every extracted value before submitting.')}
             </p>
           </div>
 
@@ -1065,30 +1055,47 @@ export const RegistrationEngine: React.FC<Props> = ({ mode = 'customer', onCompl
 
             {/* Dynamic Fields Extracted Card */}
             {uploadedDocs.length > 0 && !isExtracting && docIntelExtractedData && Object.keys(docIntelExtractedData).length > 0 && (
-              <div style={{ marginTop: '16px', padding: '16px', background: '#F0FDF4', borderRadius: '10px', border: '1px solid #BBF7D0' }}>
-                <div style={{ fontSize: '0.85rem', fontWeight: 700, color: '#166534', marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <div style={{ marginTop: '16px', padding: '16px', background: '#F8FAFC', borderRadius: '10px', border: '1px solid #CBD5E1' }}>
+                <div style={{ fontSize: '0.85rem', fontWeight: 700, color: '#0F172A', marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '6px' }}>
                   <CheckCircle size={16} />
-                  Dynamically Extracted Fields ({Object.keys(docIntelExtractedData).length} fields preserved):
+                  Extracted evidence ({Object.keys(docIntelExtractedData).length} fields)
                 </div>
+                <p style={{ fontSize: '0.75rem', color: '#475569', margin: '0 0 10px' }}>
+                  High-confidence fields are prefilled. Review medium-confidence fields; low or unscored fields are not prefilled.
+                </p>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
                   {Object.entries(docIntelExtractedData).map(([fieldKey, val]) => (
-                    <div
-                      key={fieldKey}
-                      style={{
-                        background: '#FFFFFF',
-                        border: '1px solid #86EFAC',
-                        borderRadius: '6px',
-                        padding: '4px 10px',
-                        fontSize: '0.78rem',
-                        color: '#15803D',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '6px',
-                      }}
-                    >
-                      <span style={{ fontWeight: 600, color: '#166534' }}>{fieldKey.replace(/_/g, ' ')}:</span>
-                      <span>{String(val)}</span>
-                    </div>
+                    (() => {
+                      const field = val as { value: string; confidence: number; source: string };
+                      const status = confidenceStatus(field.confidence);
+                      const statusLabel = status === 'approved'
+                        ? 'High confidence · prefilled'
+                        : status === 'pending'
+                          ? 'Review required · not prefilled'
+                          : 'Unscored / low confidence · not prefilled';
+                      const color = status === 'approved' ? '#166534' : status === 'pending' ? '#92400E' : '#991B1B';
+                      const border = status === 'approved' ? '#86EFAC' : status === 'pending' ? '#FCD34D' : '#FCA5A5';
+                      return (
+                        <div
+                          key={fieldKey}
+                          title={`${field.source}; ${statusLabel}`}
+                          style={{
+                            background: '#FFFFFF',
+                            border: `1px solid ${border}`,
+                            borderRadius: '6px',
+                            padding: '6px 10px',
+                            fontSize: '0.78rem',
+                            color,
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: '3px',
+                          }}
+                        >
+                          <span style={{ fontWeight: 600 }}>{fieldKey.replace(/_/g, ' ')}: {field.value}</span>
+                          <span style={{ fontSize: '0.68rem' }}>{statusLabel} · {field.confidence}% · {field.source}</span>
+                        </div>
+                      );
+                    })()
                   ))}
                 </div>
               </div>

@@ -9,7 +9,6 @@ import {
   snUploadCustomerDoc,
   snUpdateCustomerProfile,
   snRequestAdditionalDocuments,
-  snRunAgenticWorkflow,
   snCreateTicket,
   snReplyTicket,
   SNFamily,
@@ -1957,58 +1956,15 @@ export const Bridge360Provider: React.FC<{ children: React.ReactNode }> = ({ chi
     const famDocs = documents.filter(d => d.familyId === familyId || d.applicationId === familyId);
     
     // 1. Run local agentic pipeline for instant UI feedback
-    const result = await AgentOrchestrator.runWorkflow(fam, famDocs, fam.householdSize);
+    const result = await AgentOrchestrator.runWorkflow(fam, famDocs);
 
-    // 2. Update local document statuses to 'Verified' or 'Flagged' based on agent results
-    setDocuments(prev =>
-      prev.map(d => {
-        if (d.familyId === familyId || d.applicationId === familyId) {
-          const isFlagged = result.docAnalysis.discrepancies.some(disc => disc.includes(d.documentType));
-          return {
-            ...d,
-            verificationStatus: isFlagged ? 'Rejected' : 'Verified',
-            notes: isFlagged ? 'Flagged by Document Analyst Agent' : 'Verified by Document Analyst Agent',
-          };
-        }
-        return d;
-      })
-    );
-
-    // 3. Update family record state locally (assigned officer, priority, registration status)
-    setFamilies(prev =>
-      prev.map(f => {
-        if (f.id === familyId || f.applicationId === familyId) {
-          const seq = f.applicationId.split('-')[2] || '000001';
-          const mintedRid = `RID-2026-${seq}`;
-          const totalHousehold = 1 + (f.members ? f.members.length : 0);
-          const mintedFamId = totalHousehold === 1 ? mintedRid : `FAM-2026-${seq}`;
-          const isApproved = result.decisionDraft.recommendation === 'Approved';
-
-          return {
-            ...f,
-            assignedOfficer: result.triage.assignedOfficer,
-            priority: result.triage.priority,
-            verificationStatus: result.docAnalysis.status === 'Verified' ? 'Verified' : 'Requires Review',
-            registrationStatus: isApproved ? 'Approved' : 'Under Review',
-            caseStatus: isApproved ? 'Active' : f.caseStatus,
-            bridge360Id: isApproved ? mintedFamId : f.bridge360Id,
-            familyId: isApproved ? mintedFamId : f.familyId,
-            headOfFamily: {
-              ...f.headOfFamily,
-              refugeeId: isApproved ? mintedRid : f.headOfFamily?.refugeeId,
-            },
-          };
-        }
-        return f;
-      })
-    );
-
-    // 4. Create Decision Draft Note locally
+    // Keep the workflow advisory: only create a draft note; do not verify documents,
+    // change case fields, mint IDs, or invoke the server-side write workflow.
     const newNote: FamilyNote = {
       id: `NOTE-AGENT-${Date.now()}`,
       familyId,
       author: 'AI Intern Agent',
-      text: `Draft Recommendation: ${result.decisionDraft.recommendation}\nJustification: ${result.decisionDraft.justification}`,
+      text: `Advisory draft (no changes applied): ${result.decisionDraft.recommendation}\nJustification: ${result.decisionDraft.justification}`,
       timestamp: new Date().toLocaleString(),
     };
     setNotes(prev => [newNote, ...prev]);
@@ -2017,21 +1973,14 @@ export const Bridge360Provider: React.FC<{ children: React.ReactNode }> = ({ chi
       {
         id: `TL-AGENT-${Date.now()}`,
         familyId,
-        title: 'Orchestrated Agent Workflow Completed',
-        description: `Recommendation: ${result.decisionDraft.recommendation}`,
+        title: 'AI Advisory Assessment Prepared',
+        description: `Draft recommendation: ${result.decisionDraft.recommendation}. No records were changed.`,
         type: 'note',
         timestamp: new Date().toLocaleString(),
         actor: 'AI Intern Agent',
       },
       ...prev,
     ]);
-
-    // 5. Trigger server-side ServiceNow script execution (runs u_bridge360 tables sync)
-    try {
-      await snRunAgenticWorkflow((fam as any).sys_id || familyId);
-    } catch (e) {
-      console.warn('snRunAgenticWorkflow server execution warning:', e);
-    }
 
     return result;
   };

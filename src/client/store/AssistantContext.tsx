@@ -45,12 +45,35 @@ export type MascotAnimation =
   | 'nod'
   | 'point'
   | 'celebrate'
-  | 'work';
+  | 'work'
+  | 'idle-wave'
+  | 'idle-listen'
+  | 'idle-stretch'
+  | 'idle-sway'
+  | 'idle-twirl'
+  | 'idle-bounce'
+  | 'idle-kick'
+  | 'idle-look'
+  | 'idle-salute'
+  | 'idle-dance'
+  | 'idle-skate'
+  | 'idle-cape'
+  | 'idle-spin'
+  | 'idle-shrug'
+  | 'idle-peek';
 
 export interface AssistantActivity {
   kind: 'input' | 'action' | 'navigation' | 'error';
   detail: string;
   at: number;
+}
+
+export interface AssistantGuideTarget {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  label: string;
 }
 
 export type AgentRunStatus = 'idle' | 'running' | 'completed' | 'error';
@@ -155,6 +178,8 @@ interface AssistantContextType {
   /** Lightweight activity feed so the assistant can react proactively. */
   lastActivity: AssistantActivity | null;
   reportActivity: (kind: AssistantActivity['kind'], detail: string) => void;
+  guideTarget: AssistantGuideTarget | null;
+  setGuideTarget: (target: AssistantGuideTarget | null) => void;
 
   /** Case context for the admin Intern — which SN record to reason over. */
   agentTarget: AgentTarget | null;
@@ -208,6 +233,7 @@ export const AssistantProvider: React.FC<{ children: ReactNode }> = ({ children 
   const [pendingApproval, setPendingApproval] = useState<PendingApproval | null>(null);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [lastActivity, setLastActivity] = useState<AssistantActivity | null>(null);
+  const [guideTarget, setGuideTarget] = useState<AssistantGuideTarget | null>(null);
   const [agentTarget, setAgentTarget] = useState<AgentTarget | null>(null);
   const [pendingPrompt, setPendingPrompt] = useState<{ text: string; key: number } | null>(null);
   const promptKeyRef = useRef(0);
@@ -329,6 +355,8 @@ export const AssistantProvider: React.FC<{ children: ReactNode }> = ({ children 
         setConversationId,
         lastActivity,
         reportActivity,
+        guideTarget,
+        setGuideTarget,
         agentTarget,
         setAgentTarget,
         pendingPrompt,

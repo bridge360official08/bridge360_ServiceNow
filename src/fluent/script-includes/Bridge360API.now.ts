@@ -788,54 +788,16 @@ Bridge360API.prototype = {
         return { success: false, message: 'Family record not found' };
       }
 
-      // ── Trigger Native ServiceNow AI Agent Studio sn_aia API ──
-      try {
-        var agentRequest = {
-          targetRecordId: familySysId,
-          targetTable: "u_bridge360_family",
-          objective: "Orchestrate case triage, document analysis, risk assessment, and decision drafting.",
-          conversationLabel: "Bridge360 Case Processing"
-        };
-        var aiAgentRuntimeUtil = new sn_aia.AiAgentRuntimeUtil();
-        var agentResponse = aiAgentRuntimeUtil.startAiAgentConversation(agentRequest);
-        gs.log("ServiceNow AI Agent Studio Response: " + JSON.stringify(agentResponse));
-      } catch (aiaErr) {
-        gs.log("ServiceNow sn_aia Agent Studio API fallback active (Instance might not have Now Assist Pro+/Xanadu license configured): " + aiaErr);
-      }
-
-      // ── Agent 1: Triage Agent ──
-      var country = (grFam.getValue('u_country_of_origin') || '').toUpperCase();
-      var officer = 'Sarah Jenkins';
-      var priority = 'normal';
-      
-      if (country.indexOf('SYRIA') !== -1 || country.indexOf('IRAQ') !== -1) {
-        officer = 'Sarah Jenkins';
-        priority = 'high';
-      } else if (country.indexOf('VENEZUELA') !== -1 || country.indexOf('COLOMBIA') !== -1) {
-        officer = 'Carlos Ruiz';
-        priority = 'normal';
-      } else if (country.indexOf('UKRAINE') !== -1) {
-        officer = 'Yelena Kozlov';
-        priority = 'high';
-      }
-      
-      if (grFam.getValue('u_needs_interpreter') === 'true' || grFam.getValue('u_needs_interpreter') === true) {
-        priority = 'high';
-      }
-
-      grFam.setValue('u_assigned_officer', officer);
-      grFam.setValue('u_priority', priority);
-
-      // ── Agent 2: Document Analyst Agent ──
+      // This endpoint is intentionally read-only. Agent Studio runtime access and
+      // supervised write actions must be configured and verified per instance first.
+      var officer = grFam.getDisplayValue('u_assigned_officer') || 'Officer assignment required';
+      var priority = grFam.getValue('u_priority') || 'normal';
       var grDoc = new GlideRecord('u_bridge360_document');
       grDoc.addQuery('u_family', familySysId);
       grDoc.query();
-      
       var discrepancies = [];
-      var verifiedCount = 0;
-      var docStatus = 'verified';
-
-      // Get head member details for matching
+      var initialMatchCount = 0;
+      var docCount = 0;
       var grMem = new GlideRecord('u_bridge360_member');
       grMem.addQuery('u_family', familySysId);
       grMem.addQuery('u_is_head', true);
@@ -846,85 +808,42 @@ Bridge360API.prototype = {
       }
 
       while (grDoc.next()) {
+        docCount++;
         var ocrText = (grDoc.getValue('u_ocr_text') || '').toUpperCase();
-        if (ocrText) {
-          if (headName && ocrText.indexOf(headName) === -1) {
-            var descStr = 'Name Mismatch: Document (' + grDoc.getValue('u_document_type') + ') name does not match applicant ' + headName;
-            discrepancies.push(descStr);
-            grDoc.setValue('u_verification_status', 'flagged');
-            grDoc.setValue('u_verification_notes', descStr);
-          } else {
-            verifiedCount++;
-            grDoc.setValue('u_verification_status', 'verified');
-            grDoc.setValue('u_verification_notes', 'Verified by Document Analyst Agent.');
-          }
-          grDoc.update();
+        if (!ocrText || !headName) {
+          discrepancies.push((grDoc.getValue('u_document_type') || 'Document') + ': extracted text or applicant name is unavailable for comparison.');
+        } else if (ocrText.indexOf(headName) === -1) {
+          discrepancies.push((grDoc.getValue('u_document_type') || 'Document') + ': applicant name was not found in extracted text; officer inspection required.');
+        } else {
+          initialMatchCount++;
         }
       }
 
-      if (discrepancies.length > 0) {
-        docStatus = 'in_review';
-        grFam.setValue('u_verification_status', 'in_review');
-      } else {
-        grFam.setValue('u_verification_status', 'verified');
+      var completenessIssues = [];
+      if (!headName) completenessIssues.push('Applicant name is missing');
+      if (docCount === 0) completenessIssues.push('No identity documents are attached');
+      if ((grFam.getValue('u_needs_interpreter') === 'true' || grFam.getValue('u_needs_interpreter') === true) &&
+          !grFam.getValue('u_primary_language')) {
+        completenessIssues.push('Preferred language is not recorded for the requested interpreter support');
       }
 
-      // ── Agent 3: Risk Assessment Agent ──
-      var size = parseInt(grFam.getValue('u_household_size') || '1', 10);
-      var riskScore = 'low';
-      var riskFactors = [];
-
-      if (size > 5) {
-        riskScore = 'medium';
-        riskFactors.push('Large household size requires additional housing coordination.');
-      }
-
-      var grMemAge = new GlideRecord('u_bridge360_member');
-      grMemAge.addQuery('u_family', familySysId);
-      grMemAge.query();
-      while (grMemAge.next()) {
-        var dob = grMemAge.getValue('u_date_of_birth');
-        if (dob) {
-          var birthYear = parseInt(dob.split('-')[0], 10);
-          var age = 2026 - birthYear;
-          if (age > 65) {
-            riskScore = 'high';
-            riskFactors.push('Elderly member (' + grMemAge.getValue('u_first_name') + ') requires immediate medical prioritization.');
-          }
-        }
-      }
-
-      if (riskScore === 'high') {
-        grFam.setValue('u_priority', 'high');
-      }
-
-      // ── Agent 4: Decision Drafter Agent ──
-      var recommendation = 'approved';
-      var justification = '';
-
-      if (docStatus === 'in_review') {
-        recommendation = 'pending_review';
-        justification = 'Document analyst flagged discrepancies: ' + discrepancies.join('; ') + '. Suggested requesting additional identity support documents.';
-      } else {
-        justification = 'All documents successfully matched and verified. Triage set to ' + officer + ' at ' + priority + ' priority. Overall risk factor is ' + riskScore + '.';
-      }
-
-      grFam.setValue('u_registration_status', recommendation);
-      grFam.update();
-
-      // Create a System Note to hold the drafted justification
-      var grNote = new GlideRecord('u_bridge360_note');
-      grNote.initialize();
-      grNote.setValue('u_family', familySysId);
-      grNote.setValue('u_author', 'AI Orchestrator');
-      grNote.setValue('u_text', 'Decision Draft Agent Recommendation: ' + recommendation.toUpperCase() + '\\nJustification: ' + justification);
-      grNote.insert();
+      var riskScore = discrepancies.length ? 'high' : completenessIssues.length ? 'medium' : 'low';
+      var recommendation = discrepancies.length || completenessIssues.length
+        ? 'clarification_recommended'
+        : 'officer_review_recommended';
+      var justification = 'Advisory text matching found ' + initialMatchCount + ' initial match(es) across ' +
+        docCount + ' document(s). This is not identity verification or an approval. ' +
+        (discrepancies.length ? 'Officer inspection is required for: ' + discrepancies.join('; ') + '. ' : '') +
+        (completenessIssues.length ? 'Information to complete: ' + completenessIssues.join('; ') + '.' : 'An authorized officer must review the evidence and decide.');
 
       return {
         success: true,
-        triage: { assignedOfficer: officer, priority: priority },
-        docAnalysis: { status: docStatus, verifiedCount: verifiedCount, discrepancies: discrepancies },
-        riskAssessment: { score: riskScore, factors: riskFactors },
+        advisoryOnly: true,
+        recordsChanged: false,
+        triage: { assignedOfficer: officer, priority: priority, notes: 'Current assignment and priority shown; no automatic routing or reprioritization.' },
+        docAnalysis: { status: discrepancies.length ? 'needs_review' : docCount ? 'initial_match_only' : 'needs_review', initialMatchCount: initialMatchCount, discrepancies: discrepancies },
+        completenessReview: { status: completenessIssues.length ? 'needs_information' : 'ready_for_officer_review', missingItems: completenessIssues },
+        riskAssessment: { score: riskScore, factors: discrepancies.concat(completenessIssues) },
         decisionDraft: { recommendation: recommendation, justification: justification }
       };
     } catch (e) {

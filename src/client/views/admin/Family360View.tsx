@@ -85,10 +85,10 @@ export const Family360View: React.FC = () => {
   React.useEffect(() => {
     const unregister = registerActionHandler(async (actionType: string) => {
       if (actionType === 'VERIFY_DOCUMENTS' && selectedFamilyId) {
-        setProactiveMessage("I am running the 4-Agent Orchestrator workflow... please stand by!");
+        setProactiveMessage('I am preparing a read-only advisory assessment with six specialist checks. No case or document records will be changed.');
         try {
           const res = await runAgenticWorkflow(selectedFamilyId);
-          const summary = `Workflow Complete! Triage Agent assigned ${res.triage.assignedOfficer} (${res.triage.priority} Priority). Document Analyst Agent status: ${res.docAnalysis.status} (Verified: ${res.docAnalysis.verifiedCount}). Decision Drafter Drafted recommendation: ${res.decisionDraft.recommendation}.`;
+          const summary = `Advisory assessment ready; no records changed. Current assignment: ${res.triage.assignedOfficer} (${res.triage.priority}). Document Analyst: ${res.docAnalysis.status} (${res.docAnalysis.initialMatchCount} initial text match(es), not verified). Completeness: ${res.completenessReview.status}. Record integrity: ${res.riskAssessment.score}. Support suggestions: ${res.supportPlan.recommendations.length}. Draft: ${res.decisionDraft.recommendation}.`;
           setProactiveMessage(summary);
         } catch (e) {
           console.error(e);
