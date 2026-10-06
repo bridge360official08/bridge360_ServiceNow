@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { useAssistant } from '../../store/AssistantContext';
 import { useBridge360 } from '../../store/Bridge360Context';
+import { GeminiService } from '../../services/GeminiService';
 import {
   snAgentCaseSummary, snAgentDraftDecision, snAgentDraftMessage, snAgentApplyDecision,
   type SNApplyDecisionResponse,
@@ -17,12 +18,20 @@ const clock = () => new Date().toLocaleTimeString([], { hour: '2-digit', minute:
 
 type ResultKind = 'summary' | 'decision' | 'message';
 
+export interface CaseSummaryFacts {
+  registrationStatus: string;
+  verificationStatus: string;
+  caseStatus: string;
+  documentCount: number;
+  verifiedDocumentCount: number;
+}
+
 interface ResultCard {
   id: string;
   kind: ResultKind;
   title: string;
   text: string;
-  source?: 'servicenow' | 'canned';
+  source?: 'servicenow' | 'gemini' | 'canned';
   /** Decision cards carry Apply controls. */
   applicable?: boolean;
 }
@@ -36,6 +45,8 @@ export interface InternPanelProps {
   localFamilyId: string;
   /** Family's preferred language for drafts / customer messages. */
   language?: string;
+  /** De-identified workflow facts only; no names, IDs, or OCR text. */
+  summaryFacts: CaseSummaryFacts;
   /** Tighter layout for the verification sidebar. */
   compact?: boolean;
   /**
@@ -52,10 +63,10 @@ export interface InternPanelProps {
  * buttons; every draft can be copied or filed as an officer note.
  */
 export const InternPanel: React.FC<InternPanelProps> = ({
-  familySysId, familyLabel, localFamilyId, language, compact, onApplied,
+  familySysId, familyLabel, localFamilyId, language, summaryFacts, compact, onApplied,
 }) => {
   const { dispatchToAssistant, addMessage, setIsOpen, playAnimation } = useAssistant();
-  const { addFamilyNote, t } = useBridge360();
+  const { addFamilyNote, language: uiLanguage, t } = useBridge360();
 
   const [busy, setBusy] = useState<ResultKind | 'apply' | null>(null);
   const [cards, setCards] = useState<ResultCard[]>([]);
@@ -66,7 +77,7 @@ export const InternPanel: React.FC<InternPanelProps> = ({
 
   // Push a user→assistant pair into the chat so the inline result is mirrored
   // there too, and surface the panel.
-  const mirrorToChat = (ask: string, answer: string, source?: 'servicenow' | 'canned') => {
+  const mirrorToChat = (ask: string, answer: string, source?: 'servicenow' | 'gemini' | 'canned') => {
     addMessage({ id: iid(), sender: 'user', text: ask, timestamp: clock() });
     addMessage({ id: iid(), sender: 'assistant', text: answer, timestamp: clock(), source });
     setIsOpen(true);
@@ -77,17 +88,60 @@ export const InternPanel: React.FC<InternPanelProps> = ({
     setCards(prev => [{ id: iid(), ...card }, ...prev]);
   };
 
+  const buildLocalSummary = () => {
+    const outstandingDocuments = Math.max(0, summaryFacts.documentCount - summaryFacts.verifiedDocumentCount);
+    return [
+      'AI summary unavailable; this is a local workflow snapshot only.',
+      `Registration: ${summaryFacts.registrationStatus}; verification: ${summaryFacts.verificationStatus}; case: ${summaryFacts.caseStatus}.`,
+      `Documents: ${summaryFacts.verifiedDocumentCount} of ${summaryFacts.documentCount} marked verified; ${outstandingDocuments} need review.`,
+      `Next actions: ${outstandingDocuments ? 'review outstanding documents and record the officer outcome' : 'confirm the case record is complete and proceed with officer review'}.`,
+    ].join('\n');
+  };
+
+  const summarizeAnonymizedFacts = async (): Promise<string | null> => {
+    if (!GeminiService.isConfigured()) return null;
+    const prompt = [
+      'Write a concise case-workflow summary and 2 practical next steps using only these de-identified aggregate facts.',
+      'Do not infer identity, nationality, personal circumstances, or facts not listed.',
+      'Do not request or claim approval; this is advisory only.',
+      `Facts: ${JSON.stringify(summaryFacts)}`,
+    ].join('\n');
+    const response = await GeminiService.sendMessage(
+      prompt,
+      'admin',
+      'De-identified Family 360 workflow summary',
+      [],
+      uiLanguage,
+    );
+    return response.trim() && !/^Connection error:/i.test(response.trim()) ? response.trim() : null;
+  };
+
   const runSummary = async () => {
     if (disabled || busy) return;
     setBusy('summary'); setError('');
     try {
       const res = await snAgentCaseSummary(familySysId!, language);
-      if (res.success && res.summary) {
-        pushCard({ kind: 'summary', title: t('intern.summaryTitle', 'Case summary & next actions'), text: res.summary, source: res.source });
-        mirrorToChat(t('intern.askSummary', 'Summarize this case and recommend next actions.'), res.summary, res.source);
-      } else {
-        setError(res.message || t('intern.failed', 'The Intern could not complete that just now.'));
+      const serviceNowSummary = res.summary?.trim() || '';
+      const planFailure = /(?:plan.{0,32}(?:invalid|not created|not found)|(?:invalid|not created).{0,32}plan)/i
+        .test(serviceNowSummary || res.message || '');
+      const preferGemini = res.source === 'canned' && GeminiService.isConfigured();
+      if (res.success && serviceNowSummary && !planFailure && !preferGemini) {
+        pushCard({ kind: 'summary', title: t('intern.summaryTitle', 'Case summary & next actions'), text: serviceNowSummary, source: res.source });
+        mirrorToChat(t('intern.askSummary', 'Summarize this case and recommend next actions.'), serviceNowSummary, res.source);
+        return;
       }
+
+      const geminiSummary = await summarizeAnonymizedFacts();
+      const summary = geminiSummary || buildLocalSummary();
+      const source = geminiSummary ? 'gemini' : 'canned';
+      pushCard({ kind: 'summary', title: t('intern.summaryTitle', 'Case summary & next actions'), text: summary, source });
+      mirrorToChat(t('intern.askSummary', 'Summarize this case and recommend next actions.'), summary, source);
+    } catch (summaryError) {
+      console.error('Case summary failed:', summaryError);
+      const summary = buildLocalSummary();
+      pushCard({ kind: 'summary', title: t('intern.summaryTitle', 'Case summary & next actions'), text: summary, source: 'canned' });
+      mirrorToChat(t('intern.askSummary', 'Summarize this case and recommend next actions.'), summary, 'canned');
+      setError(t('intern.failed', 'The Intern could not complete that just now.'));
     } finally {
       setBusy(null);
     }
@@ -234,9 +288,13 @@ export const InternPanel: React.FC<InternPanelProps> = ({
             <div key={card.id} style={{ background: '#FFFFFF', borderRadius: '10px', border: '1px solid #E2E8F0', padding: '14px', color: '#0F172A' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
                 <span style={{ fontSize: '0.78rem', fontWeight: 800, color: '#0F172A' }}>{card.title}</span>
-                {card.source && (
+                {card.source && card.source !== 'gemini' && (
                   <span style={{ fontSize: '0.62rem', color: card.source === 'servicenow' ? '#16A34A' : '#94A3B8', display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
-                    {card.source === 'servicenow' ? <><ShieldCheck size={10} /> ServiceNow AI</> : t('assistant.srcOffline', 'offline mode')}
+                    {card.source === 'servicenow'
+                      ? <><ShieldCheck size={10} /> ServiceNow AI</>
+                      : card.source === 'gemini'
+                        ? 'Gemini'
+                        : t('assistant.srcOffline', 'offline mode')}
                   </span>
                 )}
               </div>

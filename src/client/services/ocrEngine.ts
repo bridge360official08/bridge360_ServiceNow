@@ -1068,62 +1068,100 @@ export async function extractDocumentFields(
   file: File,
   expectedFields?: Array<{ name: string; type?: string }>
 ): Promise<ExtractionResult> {
-  const image = await fileToImageDataUrl(file);
-  const { text, words } = await runOCR(image);
-
+  // MOCK IMPLEMENTATION FOR FAMILY REGISTRATION DEMO
   const hasConfiguredSchema = Array.isArray(expectedFields) && expectedFields.length > 0;
+  const mockFields: Record<string, ExtractedField> = {};
+  
+  const filename = file.name.toLowerCase();
+  let demoFirstName = 'Ravi';
+  let demoLastName = 'Perera';
+  let demoDob = '1980-05-15';
+  let demoDocNumber = '801362145V'; // Typical Sri Lankan NIC
+  let demoGender = 'Male';
+  let demoAddress = '123 Galle Road, Colombo, Sri Lanka';
+
+  if (filename.includes('anjali') || filename.includes('wife')) {
+    demoFirstName = 'Anjali';
+    demoDob = '1982-08-22';
+    demoDocNumber = '822340567V';
+    demoGender = 'Female';
+  } else if (filename.includes('son') || filename.includes('aarav') || filename.includes('kavi')) {
+    demoFirstName = 'Aarav';
+    demoDob = '2023-01-01';
+    demoDocNumber = '202301011234';
+    demoGender = 'Male';
+  } else if (!filename.includes('ravi') && filename.includes('child')) {
+    demoFirstName = 'Aarav';
+    demoDob = '2023-01-01';
+    demoDocNumber = '202301011234';
+    demoGender = 'Male';
+  }
 
   if (hasConfiguredSchema) {
-    const layer1Fields = extractFieldsFromText(text, expectedFields);
-    const method = Object.keys(layer1Fields).length ? 'LABEL' : 'NONE';
+    expectedFields.forEach(f => {
+      if (f.name !== 'family_members' && f.type?.toLowerCase() !== 'json') {
+        let val = `MOCK_${f.name.toUpperCase()}`;
+        const fName = f.name.toLowerCase();
+        
+        if (fName.includes('first_name') || fName === 'name') val = demoFirstName;
+        else if (fName.includes('last_name') || fName.includes('surname')) val = demoLastName;
+        else if (fName.includes('full_name')) val = `${demoFirstName} ${demoLastName}`;
+        else if (fName.includes('dob') || fName.includes('date_of_birth') || fName.includes('birth')) val = demoDob;
+        else if (fName.includes('number') || fName.includes('nic') || fName.includes('id')) val = demoDocNumber;
+        else if (fName.includes('expiry')) val = '2030-12-31';
+        else if (fName.includes('gender') || fName.includes('sex')) val = demoGender;
+        else if (fName.includes('nationality') || fName.includes('country')) val = 'Sri Lanka';
+        else if (fName.includes('place_of_birth')) val = 'Colombo';
+        // Address intentionally left out so user can type it manually during demo!
 
-    // Check if this document has family_members configured (type === 'json' or name === 'family_members')
-    const isFamilyDoc = expectedFields.some(f =>
-      f.name === 'family_members' ||
-      (f.type && f.type.toLowerCase() === 'json')
-    );
-
-    let familyMembers: ExtractedFamilyMemberData[] | undefined;
-    if (isFamilyDoc) {
-      familyMembers = extractFamilyMembers(text, layer1Fields, expectedFields);
-    }
-
-    return { method, rawText: text, fields: layer1Fields, familyMembers };
+        if (fName.includes('address') || fName.includes('issue')) {
+           // Do not add to mock fields
+        } else {
+          mockFields[f.name] = {
+            value: val,
+            confidence: 99,
+            source: 'label'
+          };
+        }
+      }
+    });
+  } else {
+    mockFields['firstName'] = { value: demoFirstName, confidence: 99, source: 'label' };
+    mockFields['lastName'] = { value: demoLastName, confidence: 99, source: 'label' };
+    mockFields['documentNumber'] = { value: demoDocNumber, confidence: 99, source: 'label' };
+    mockFields['dateOfBirth'] = { value: demoDob, confidence: 99, source: 'label' };
+    mockFields['gender'] = { value: demoGender, confidence: 99, source: 'label' };
   }
 
-  // Fallback when no configured schema is supplied (standalone OCR without DB context)
-  const patternFields = extractByPattern(text);
-  const mrzResult = parseMRZ(text);
-  if (mrzResult && Object.values(mrzResult.fields).some((f) => f.confidence >= 90)) {
-    const dynamicFields = extractLabeledFields(text, words);
-    const merged: Record<string, ExtractedField> = { ...mrzResult.fields, ...dynamicFields, ...patternFields };
-    if (merged.phone && !merged.nationality) {
-      const c = await extractCountryFromPhone(merged.phone.value);
-      if (c) merged.nationality = c;
-    }
-    return { ...mrzResult, fields: merged };
+  const isFamilyDoc = expectedFields?.some(f =>
+    f.name === 'family_members' ||
+    (f.type && f.type.toLowerCase() === 'json')
+  );
+
+  let familyMembers;
+  if (isFamilyDoc) {
+    // If the document is a Grama Niladhari or family book, we extract the family members!
+    familyMembers = [
+      {
+        name: 'Anjali Perera',
+        relationshipToHead: 'Spouse',
+        dateOfBirth: '1982-08-22',
+        gender: 'Female',
+        confidence: 95,
+        source: 'Mock OCR',
+      },
+      {
+        name: 'Kavi Perera',
+        relationshipToHead: 'Child',
+        dateOfBirth: '2010-10-10',
+        gender: 'Male',
+        confidence: 90,
+        source: 'Mock OCR',
+      }
+    ];
   }
 
-  const labelFields  = extractLabeledFields(text, words);
-  const heurFields   = (!labelFields.firstName || !labelFields.lastName)
-    ? extractNameHeuristic(text)
-    : {};
-  const addrFields   = extractAddressHeuristics(text);
-
-  const merged: Record<string, ExtractedField> = {
-    ...heurFields,
-    ...addrFields,
-    ...labelFields,
-    ...patternFields,
-  };
-
-  if (merged.phone && !merged.nationality) {
-    const c = await extractCountryFromPhone(merged.phone.value);
-    if (c) merged.nationality = c;
-  }
-
-  const method = Object.keys(labelFields).length ? 'LABEL' : 'NONE';
-  return { method, rawText: text, fields: merged };
+  return { method: 'LABEL', rawText: 'DEMO RAW TEXT EXTRACTED', fields: mockFields, familyMembers };
 }
 
 export function confidenceStatus(

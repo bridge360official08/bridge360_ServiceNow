@@ -181,6 +181,13 @@ export const Family360View: React.FC = () => {
   }, [currentFamily?.sys_id, currentFamily?.applicationId, setAgentTarget]);
 
   const famDocs = currentFamily ? documents.filter(d => d.familyId === currentFamily.id || d.applicationId === currentFamily.applicationId) : [];
+  const caseSummaryFacts = {
+    registrationStatus: currentFamily?.registrationStatus || 'Unknown',
+    verificationStatus: currentFamily?.verificationStatus || 'Unknown',
+    caseStatus: currentFamily?.caseStatus || 'Unknown',
+    documentCount: famDocs.length,
+    verifiedDocumentCount: famDocs.filter(doc => doc.verificationStatus.toLowerCase() === 'verified').length,
+  };
   const famCases = currentFamily ? cases.filter(c => c.familyId === currentFamily.id || c.familyId === currentFamily.applicationId) : [];
   const famReferrals = currentFamily ? referrals.filter(r => r.familyId === currentFamily.id || r.familyId === currentFamily.applicationId) : [];
   const famAppointments = currentFamily ? appointments.filter(a => a.familyId === currentFamily.id || a.familyId === currentFamily.applicationId) : [];
@@ -737,6 +744,7 @@ export const Family360View: React.FC = () => {
           familyLabel={`${currentFamily.familyName} (${currentFamily.applicationId})`}
           localFamilyId={currentFamily.id}
           language={currentFamily.primaryLanguage}
+          summaryFacts={caseSummaryFacts}
           onApplied={(decision) => {
             if (decision === 'verify') {
               approveEntireApplication(currentFamily.applicationId);

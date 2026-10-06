@@ -1,6 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import type { MascotAnimation } from '../../store/AssistantContext';
 
+export const MASCOT_IDLE_GESTURES: MascotAnimation[] = [
+  'idle-wave', 'idle-listen', 'idle-stretch', 'idle-sway', 'idle-twirl',
+  'idle-bounce', 'idle-kick', 'idle-look', 'idle-salute', 'idle-dance',
+  'idle-skate', 'idle-cape', 'idle-spin', 'idle-shrug', 'idle-peek',
+  'idle-cheer', 'idle-moonwalk', 'idle-juggle', 'idle-spinbow', 'idle-heart',
+];
+
 /**
  * One rigged skeleton, skinned two ways (customer "Guide" / admin "Intern").
  * Every body part is its own <g class="rig-*"> so it can be animated
@@ -91,7 +98,7 @@ const SKINS: Record<Skin, SkinConfig> = {
     mouth: '#7DD3FC',
     hoodieGrad: 'AdHoodie',
     pants: 'AdPants',
-    hasCape: false,
+    hasCape: true,
     hasBadge: true,
     pose: 'pockets',
     bubbleAccent: '#22D3EE',
@@ -236,9 +243,9 @@ function Defs({ id, skin }: { id: string; skin: SkinConfig }) {
 
       {/* Customer cape */}
       <linearGradient id={id + 'Cape'} x1="0" y1="0" x2="1" y2="1">
-        <stop offset="0%" stopColor="#C084FC" />
-        <stop offset="50%" stopColor="#6366F1" />
-        <stop offset="100%" stopColor="#EC4899" />
+        <stop offset="0%" stopColor={id === 'adm' ? '#67E8F9' : '#C084FC'} />
+        <stop offset="50%" stopColor={id === 'adm' ? '#2563EB' : '#6366F1'} />
+        <stop offset="100%" stopColor={id === 'adm' ? '#0F172A' : '#EC4899'} />
       </linearGradient>
 
       {/* Chunky sneaker */}
@@ -325,14 +332,15 @@ const RiggedMascot: React.FC<{
       data-skin={skin}
     >
       <style>{`
-        .rig-root { animation: rig-float 5s cubic-bezier(.45,0,.55,1) infinite; transform-box: fill-box; transform-origin: center bottom; }
+        .rig-root { animation: rig-float 5s cubic-bezier(.45,0,.55,1) infinite; transform-box: fill-box; transform-origin: center bottom; transform-style: preserve-3d; }
         .rig-eyes { animation: rig-blink 5.4s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
         .rig-antenna-ball { animation: rig-glow 2.2s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
         .rig-cape { animation: rig-cape 6s ease-in-out infinite; transform-box: fill-box; transform-origin: top center; }
         .rig-leg-l { animation: rig-dangle 5s ease-in-out infinite; transform-box: fill-box; transform-origin: top center; }
         .rig-leg-r { animation: rig-dangle 5s ease-in-out .4s infinite; transform-box: fill-box; transform-origin: top center; }
         .rig-think { opacity: 0; transition: opacity .25s; }
-        .rig-brows, .rig-head, .rig-arm-r, .rig-arm-l, .rig-mouth, .rig-hp-logo, .rig-torso { transform-box: fill-box; }
+        .rig-brows, .rig-head, .rig-arm-r, .rig-arm-l, .rig-mouth, .rig-hp-logo, .rig-torso,
+        .rig-leg-l, .rig-leg-r, .rig-skateboard, .rig-dance-prop { transform-box: fill-box; }
         .rig-head { transform-origin: center bottom; }
         .rig-brows { transform-origin: center; }
         .rig-arm-r, .rig-arm-l { transform-origin: center top; }
@@ -340,7 +348,8 @@ const RiggedMascot: React.FC<{
         .rig-mouth { transform-origin: center; }
         .rig-torso { transform-origin: center top; }
         .rig-hp-logo { transform-origin: center; }
-        .rig-skateboard, .rig-soundmarks { opacity: 0; }
+        .rig-skateboard { transform-origin: center; }
+        .rig-skateboard, .rig-soundmarks, .rig-juggle-props, .rig-work-displays { opacity: 0; }
 
         @keyframes rig-float { 0%,100%{transform:translateY(0) rotate(0)} 50%{transform:translateY(-10px) rotate(.6deg)} }
         @keyframes rig-blink { 0%,92%,100%{transform:scaleY(1)} 96%{transform:scaleY(.08)} }
@@ -357,7 +366,13 @@ const RiggedMascot: React.FC<{
         @keyframes rig-hp { 0%,100%{opacity:.7; transform:scale(1)} 50%{opacity:1; transform:scale(1.15)} }
         @keyframes rig-dot { 0%,80%,100%{transform:scale(.4); opacity:.4} 40%{transform:scale(1); opacity:1} }
         @keyframes rig-sway { 0%,100%{transform:rotate(-3deg)} 50%{transform:rotate(3deg)} }
-        @keyframes rig-twirl { 0%,100%{transform:rotate(0) translateY(0)} 35%{transform:rotate(-12deg) translateY(-8px)} 70%{transform:rotate(12deg) translateY(-5px)} }
+        @keyframes rig-twirl {
+          0% { transform: perspective(320px) rotateY(0deg) translateY(0); }
+          25% { transform: perspective(320px) rotateY(90deg) translateY(-2px); }
+          50% { transform: perspective(320px) rotateY(180deg) translateY(0); }
+          75% { transform: perspective(320px) rotateY(270deg) translateY(-2px); }
+          100% { transform: perspective(320px) rotateY(360deg) translateY(0); }
+        }
         @keyframes rig-kick-l { 0%,100%{transform:rotate(-2deg)} 45%{transform:rotate(-22deg)} }
         @keyframes rig-kick-r { 0%,100%{transform:rotate(2deg)} 55%{transform:rotate(22deg)} }
         @keyframes rig-look { 0%,100%{transform:translateX(0)} 30%{transform:translateX(8px)} 65%{transform:translateX(-7px)} }
@@ -365,12 +380,61 @@ const RiggedMascot: React.FC<{
         @keyframes rig-stretch-r { 0%,100%{transform:rotate(0)} 45%{transform:rotate(-28deg)} }
         @keyframes rig-peek { 0%,100%{transform:rotate(0) translateX(0)} 45%{transform:rotate(-8deg) translateX(-7px)} }
         @keyframes rig-skate { 0%,100%{transform:translateX(0) rotate(0)} 30%{transform:translateX(-12px) rotate(-5deg)} 70%{transform:translateX(12px) rotate(5deg)} }
+        @keyframes rig-skate-push-l {
+          0%,100% { transform: rotate(0); }
+          28% { transform: rotate(-30deg) translateY(5px); }
+          55% { transform: rotate(8deg); }
+        }
+        @keyframes rig-skate-push-r {
+          0%,100% { transform: rotate(0); }
+          62% { transform: rotate(0); }
+          84% { transform: rotate(30deg) translateY(5px); }
+        }
+        @keyframes rig-skate-balance-l {
+          0%,100% { transform: rotate(0); }
+          50% { transform: rotate(20deg); }
+        }
+        @keyframes rig-skate-balance-r {
+          0%,100% { transform: rotate(0); }
+          50% { transform: rotate(-18deg); }
+        }
+        @keyframes rig-skate-deck {
+          0%,100% { transform: translateX(0) rotate(0); }
+          28% { transform: translateX(-10px) rotate(-2deg); }
+          68% { transform: translateX(11px) rotate(2deg); }
+        }
+        @keyframes rig-wheel-roll { to { transform: rotate(360deg); } }
+        @keyframes rig-dance {
+          0%,100% { transform: translateY(0) rotate(-4deg); }
+          25% { transform: translateY(-7px) rotate(6deg); }
+          50% { transform: translateY(0) rotate(-6deg); }
+          75% { transform: translateY(-5px) rotate(5deg); }
+        }
+        @keyframes rig-dance-step-l {
+          0%,100% { transform: rotate(-4deg); }
+          25%,75% { transform: rotate(20deg); }
+          50% { transform: rotate(-12deg); }
+        }
+        @keyframes rig-dance-step-r {
+          0%,100% { transform: rotate(4deg); }
+          25%,75% { transform: rotate(-16deg); }
+          50% { transform: rotate(12deg); }
+        }
+        @keyframes rig-pupil-look { 0%,100%{transform:translateX(0)} 30%{transform:translateX(7px)} 65%{transform:translateX(-6px)} }
         @keyframes rig-salute { 0%,100%{transform:rotate(0)} 35%,75%{transform:rotate(-45deg)} }
         @keyframes rig-shrug { 0%,100%{transform:rotate(0)} 40%,75%{transform:rotate(-14deg)} }
         @keyframes rig-cheer { 0%,100%{transform:translateY(0) scale(1)} 35%{transform:translateY(-20px) scale(1.04)} 70%{transform:translateY(-5px) scale(1.01)} }
         @keyframes rig-moonwalk { 0%,100%{transform:translateX(0)} 25%{transform:translateX(13px)} 75%{transform:translateX(-13px)} }
         @keyframes rig-juggle { 0%,100%{transform:rotate(0)} 30%{transform:rotate(-9deg) translateY(-6px)} 70%{transform:rotate(9deg) translateY(-3px)} }
-        @keyframes rig-spinbow { 0%,100%{transform:rotate(0)} 50%{transform:rotate(180deg)} }
+        @keyframes rig-spinbow {
+          0% { transform: perspective(320px) rotateY(0deg); }
+          25% { transform: perspective(320px) rotateY(90deg); }
+          50% { transform: perspective(320px) rotateY(180deg); }
+          75% { transform: perspective(320px) rotateY(270deg); }
+          100% { transform: perspective(320px) rotateY(360deg); }
+        }
+        @keyframes rig-bow { 0%,100%{transform:rotate(0) translateY(0)} 45%,70%{transform:rotate(12deg) translateY(5px)} }
+        @keyframes rig-juggle-ball { 0%,100%{transform:translateY(8px)} 50%{transform:translateY(-12px)} }
         @keyframes rig-heart { 0%,100%{transform:scale(1)} 35%{transform:scale(1.12)} 65%{transform:scale(.96)} }
 
         .rig-torso { animation: rig-breathe 4.5s ease-in-out infinite; }
@@ -399,14 +463,24 @@ const RiggedMascot: React.FC<{
         svg[data-anim="idle-kick"] .rig-leg-r { animation: rig-kick-r .7s ease-in-out 2; }
         svg[data-anim="idle-look"] .rig-eye-l,
         svg[data-anim="idle-look"] .rig-eye-r { animation: rig-look .7s ease-in-out 3; }
+        svg[data-anim="idle-look"] .rig-pupil-l { animation: rig-pupil-look .7s ease-in-out 3; }
+        svg[data-anim="idle-look"] .rig-pupil-r { animation: rig-pupil-look .7s ease-in-out 3 reverse; }
         svg[data-anim="idle-salute"] .rig-arm-r { animation: rig-salute .8s ease-in-out 2; }
-        svg[data-anim="idle-dance"] .rig-root { animation: rig-sway .55s ease-in-out 4; }
-        svg[data-anim="idle-dance"] .rig-arm-r,
-        svg[data-anim="idle-dance"] .rig-arm-l { animation: rig-wave .55s ease-in-out 4; }
+        svg[data-anim="idle-dance"] .rig-root { animation: rig-dance .62s ease-in-out 4; }
+        svg[data-anim="idle-dance"] .rig-arm-r { animation: rig-stretch-r .42s ease-in-out 4; }
+        svg[data-anim="idle-dance"] .rig-arm-l { animation: rig-stretch-l .42s ease-in-out 4; }
+        svg[data-anim="idle-dance"] .rig-leg-l { animation: rig-dance-step-l .62s ease-in-out 4; }
+        svg[data-anim="idle-dance"] .rig-leg-r { animation: rig-dance-step-r .62s ease-in-out 4; }
         svg[data-anim="idle-skate"] .rig-root { animation: rig-skate .8s ease-in-out 3; }
+        svg[data-anim="idle-skate"] .rig-leg-l { animation: rig-skate-push-l .8s ease-in-out 3; }
+        svg[data-anim="idle-skate"] .rig-leg-r { animation: rig-skate-push-r .8s ease-in-out 3; }
+        svg[data-anim="idle-skate"] .rig-arm-l { animation: rig-skate-balance-l .8s ease-in-out 3; }
+        svg[data-anim="idle-skate"] .rig-arm-r { animation: rig-skate-balance-r .8s ease-in-out 3; }
         svg[data-anim="idle-skate"] .rig-skateboard { opacity: 1; }
+        svg[data-anim="idle-skate"] .rig-skateboard { animation: rig-skate-deck .8s ease-in-out 3; }
+        svg[data-anim="idle-skate"] .rig-skateboard circle { transform-box: fill-box; transform-origin: center; animation: rig-wheel-roll .34s linear 7; }
         svg[data-anim="idle-cape"] .rig-cape { animation: rig-cape .55s ease-in-out 4; }
-        svg[data-anim="idle-spin"] .rig-root { animation: rig-twirl .65s ease-in-out 3; }
+        svg[data-anim="idle-spin"] .rig-root { animation: rig-twirl .85s ease-in-out 2; }
         svg[data-anim="idle-shrug"] .rig-arm-r,
         svg[data-anim="idle-shrug"] .rig-arm-l { animation: rig-shrug .8s ease-in-out 2; }
         svg[data-anim="idle-peek"] .rig-head { animation: rig-peek .7s ease-in-out 2; }
@@ -418,13 +492,36 @@ const RiggedMascot: React.FC<{
         svg[data-anim="idle-moonwalk"] .rig-leg-r { animation: rig-kick-r .7s ease-in-out 3; }
         svg[data-anim="idle-juggle"] .rig-root { animation: rig-juggle .7s ease-in-out 3; }
         svg[data-anim="idle-juggle"] .rig-arm-r { animation: rig-wave .65s ease-in-out 3; }
+        svg[data-anim="idle-juggle"] .rig-juggle-props { opacity: 1; }
+        svg[data-anim="idle-juggle"] .rig-juggle-ball-a { animation: rig-juggle-ball .65s ease-in-out infinite; }
+        svg[data-anim="idle-juggle"] .rig-juggle-ball-b { animation: rig-juggle-ball .65s ease-in-out .2s infinite reverse; }
+        svg[data-anim="idle-juggle"] .rig-juggle-ball-c { animation: rig-juggle-ball .65s ease-in-out .4s infinite; }
         svg[data-anim="idle-spinbow"] .rig-root { animation: rig-spinbow .85s ease-in-out 2; }
+        svg[data-anim="idle-spinbow"] .rig-head { animation: rig-bow .65s ease-in-out 2 1.7s; }
         svg[data-anim="idle-heart"] .rig-root { animation: rig-heart .7s ease-in-out 3; }
       `}</style>
 
       <Defs id={id} skin={s} />
 
       <g className="rig-root">
+        <g className="rig-work-displays" pointerEvents="none">
+          <g className="rig-work-screen-a" transform="translate(8 226)">
+            <rect width="112" height="78" rx="9" fill="#071827" fillOpacity=".94" stroke="#22D3EE" strokeWidth="4" />
+            <path d="M13 17H64M13 27H42" stroke="#BAE6FD" strokeWidth="4" strokeLinecap="round" opacity=".75" />
+            <path className="rig-work-chart" d="M13 62L31 49L47 55L66 36L84 42L99 29" fill="none" stroke="#34D399" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" strokeDasharray="56" />
+          </g>
+          <g className="rig-work-screen-b" transform="translate(382 236)">
+            <rect width="108" height="76" rx="9" fill="#071827" fillOpacity=".94" stroke="#38BDF8" strokeWidth="4" />
+            <text x="12" y="27" fill="#E0F2FE" fontSize="16" fontWeight="700">LIVE</text>
+            <text x="12" y="58" fill="#A3E635" fontSize="24" fontWeight="800">98%</text>
+            <path d="M74 20V57M84 12V57M94 28V57" stroke="#38BDF8" strokeWidth="6" strokeLinecap="round" opacity=".8" />
+          </g>
+        </g>
+        <g className="rig-juggle-props" pointerEvents="none">
+          <circle className="rig-juggle-ball-a" cx="176" cy="74" r="12" fill="#22D3EE" stroke="#E0F2FE" strokeWidth="3" />
+          <circle className="rig-juggle-ball-b" cx="250" cy="48" r="12" fill="#F472B6" stroke="#FCE7F3" strokeWidth="3" />
+          <circle className="rig-juggle-ball-c" cx="324" cy="74" r="12" fill="#FACC15" stroke="#FEF3C7" strokeWidth="3" />
+        </g>
         <g className="rig-skateboard" transform="translate(250,612)">
           <path d="M-112 -8 Q-120 0 -112 8 L112 8 Q120 0 112 -8 Z" fill="#7C3AED" stroke="#FACC15" strokeWidth="5" />
           <circle cx="-76" cy="13" r="10" fill="#F472B6" stroke="#E2E8F0" strokeWidth="3" />

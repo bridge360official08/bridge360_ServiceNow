@@ -70,6 +70,7 @@ export const CustomerDashboardView: React.FC<Props> = ({ onLogout }) => {
 
   // Member Application Detail Modal
   const [selectedMember, setSelectedMember] = useState<any | null>(null);
+  const [showIndividualAppsModal, setShowIndividualAppsModal] = useState<boolean>(false);
 
   // Upload Requested Document Modal
   const [showUploadDocModal, setShowUploadDocModal] = useState<boolean>(false);
@@ -443,9 +444,18 @@ export const CustomerDashboardView: React.FC<Props> = ({ onLogout }) => {
           <h3 style={{ fontSize: '1.05rem', fontWeight: 800, color: '#0F172A' }}>
             Application Status Tracker
           </h3>
-          <span className={`badge ${currentStepIdx === 3 ? 'badge-high' : 'badge-medium'}`}>
-            Current State: {currentStepIdx === 3 ? 'Approved (Verified)' : statusSteps[currentStepIdx]}
-          </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <button 
+              className="btn-secondary" 
+              style={{ fontSize: '0.8rem', padding: '6px 12px' }}
+              onClick={() => setShowIndividualAppsModal(true)}
+            >
+              <Eye size={14} /> View Member Details
+            </button>
+            <span className={`badge ${currentStepIdx === 3 ? 'badge-high' : 'badge-medium'}`}>
+              Current State: {currentStepIdx === 3 ? 'Approved (Verified)' : statusSteps[currentStepIdx]}
+            </span>
+          </div>
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', position: 'relative', margin: '10px 20px' }}>
@@ -591,6 +601,9 @@ export const CustomerDashboardView: React.FC<Props> = ({ onLogout }) => {
                   <div style={{ fontSize: '0.78rem', color: '#64748B' }}>
                     Head of Household • {family.headOfFamily.gender || 'Adult'} • DOB: {family.headOfFamily.dateOfBirth || '2000-01-01'}
                   </div>
+                  <div style={{ fontSize: '0.82rem', marginTop: '4px', fontWeight: 700, color: family.headOfFamily.refugeeId?.startsWith('REF-') ? '#059669' : '#3B82F6' }}>
+                    ID: {family.headOfFamily.refugeeId || 'Pending'} {family.headOfFamily.refugeeId?.startsWith('REF-') ? '(Verified)' : '(Under Review)'}
+                  </div>
                   {family.headOfFamily.mobileNumber && (
                     <div style={{ fontSize: '0.78rem', color: '#2563EB', marginTop: '2px' }}>
                       📞 {family.headOfFamily.mobileNumber}
@@ -624,6 +637,9 @@ export const CustomerDashboardView: React.FC<Props> = ({ onLogout }) => {
                     </div>
                     <div style={{ fontSize: '0.78rem', color: '#64748B' }}>
                       {m.relationshipToHead || 'Dependent'} • {m.gender} • DOB: {m.dateOfBirth || 'N/A'}
+                    </div>
+                    <div style={{ fontSize: '0.82rem', marginTop: '4px', fontWeight: 700, color: m.refugeeId?.startsWith('REF-') ? '#059669' : '#3B82F6' }}>
+                      ID: {m.refugeeId || 'Pending'} {m.refugeeId?.startsWith('REF-') ? '(Verified)' : '(Under Review)'}
                     </div>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -1143,6 +1159,64 @@ export const CustomerDashboardView: React.FC<Props> = ({ onLogout }) => {
 
             <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
               <button className="btn-primary" onClick={() => setSelectedMember(null)}>Close</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* INDIVIDUAL APPLICATIONS MODAL (LIST OF MEMBERS) */}
+      {showIndividualAppsModal && (
+        <div className="modal-overlay" onClick={() => setShowIndividualAppsModal(false)}>
+          <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '600px', background: '#FFFFFF', color: '#0F172A' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <h3 style={{ fontSize: '1.2rem', fontWeight: 800 }}>Individual Applications</h3>
+              <button onClick={() => setShowIndividualAppsModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748B' }}>
+                <X size={18} />
+              </button>
+            </div>
+            
+            <p style={{ fontSize: '0.9rem', color: '#64748B', marginBottom: '20px' }}>
+              Select a family member below to view their specific application ID and verification status.
+            </p>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              {[family.headOfFamily, ...(family.members || [])].filter(Boolean).map((m: any, idx: number) => {
+                const isVerified = m.refugeeId?.startsWith('REF-');
+                return (
+                  <div 
+                    key={idx}
+                    onClick={() => {
+                      setSelectedMember({ ...m, isHead: idx === 0, status: family.registrationStatus, verificationStatus: family.verificationStatus });
+                    }}
+                    style={{
+                      padding: '16px',
+                      background: '#F8FAFC',
+                      border: '1px solid #E2E8F0',
+                      borderRadius: '10px',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease'
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.border = '1px solid #BFDBFE'; e.currentTarget.style.background = '#F0F9FF'; }}
+                    onMouseLeave={e => { e.currentTarget.style.border = '1px solid #E2E8F0'; e.currentTarget.style.background = '#F8FAFC'; }}
+                  >
+                    <div>
+                      <div style={{ fontWeight: 800, fontSize: '1rem', color: '#0F172A' }}>{m.firstName} {m.lastName}</div>
+                      <div style={{ fontSize: '0.8rem', color: '#64748B', marginTop: '2px' }}>
+                        {idx === 0 ? 'Head of Household' : m.relationshipToHead || 'Dependent'} • ID: {m.refugeeId || 'Pending'}
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <span className={`badge ${isVerified ? 'badge-high' : 'badge-medium'}`}>
+                        {isVerified ? 'Verified' : 'Under Review'}
+                      </span>
+                      <ArrowRight size={16} color="#94A3B8" />
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>

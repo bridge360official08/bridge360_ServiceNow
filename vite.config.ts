@@ -4,6 +4,7 @@ import path from 'path';
 
 export default defineConfig({
   plugins: [react()],
+  envDir: __dirname,
   root: 'src/client',
   publicDir: '../../public',
   build: {

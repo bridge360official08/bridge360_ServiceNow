@@ -59,6 +59,10 @@ function parseAction(text: string): { clean: string; action: string | null } {
   return { clean, action };
 }
 
+function isInvalidPlanMessage(message: string): boolean {
+  return /(?:plan.{0,32}(?:invalid|not created|not found)|(?:invalid|not created).{0,32}plan)/i.test(message);
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise(r => setTimeout(r, ms));
 }
@@ -172,6 +176,10 @@ async function trySN(message: string, opts: AssistantSendOptions): Promise<Assis
   const poll = await pollUntilSettled(start.conversationId);
   // No message at all, or a hard error → let the caller fall back to Gemini.
   if (!poll || poll.status === 'error' || (!poll.message && poll.status !== 'input-required')) {
+    return null;
+  }
+  if (poll.message && isInvalidPlanMessage(poll.message)) {
+    noteSnFailure();
     return null;
   }
   return toReply(start.conversationId, poll);

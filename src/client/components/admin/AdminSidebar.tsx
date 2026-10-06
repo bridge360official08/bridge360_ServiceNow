@@ -19,7 +19,7 @@ import {
   LogOut
 } from 'lucide-react';
 import { useBridge360 } from '../../store/Bridge360Context';
-import { useAssistant } from '../../store/AssistantContext';
+import { useAssistant, type AgentRun } from '../../store/AssistantContext';
 import { Bridge360Logo } from '../common/Bridge360Logo';
 
 interface AdminSidebarProps {
@@ -27,9 +27,119 @@ interface AdminSidebarProps {
 }
 
 export const AdminSidebar: React.FC<AdminSidebarProps> = ({ onLogout }) => {
-  const { adminView, setAdminView, setSelectedFamilyId, t } = useBridge360();
-  const { setProactiveMessage, setProactiveAction, playAnimation } = useAssistant();
+  const { adminView, setAdminView, setSelectedFamilyId, partnerAgencies, referrals, t } = useBridge360();
+  const {
+    setProactiveMessage, setProactiveAction, playAnimation, addAgentRun, updateAgentRun,
+    dispatchToAssistant, reportActivity,
+  } = useAssistant();
   const [collapsed, setCollapsed] = useState<boolean>(false);
+
+  const runSlotAvailabilityAudit = async () => {
+    setProactiveAction(null);
+    setProactiveMessage('Checking the partner-capacity data currently listed in Bridge360. This will not contact or book a partner.');
+    reportActivity('action', 'Started partner capacity snapshot');
+    playAnimation('think');
+
+    const stages: AgentRun['stages'] = [
+      { id: 'triage', label: 'Scout · Open referral demand', status: 'pending' },
+      { id: 'docs', label: 'Prism · Group listed capacity', status: 'pending' },
+      { id: 'completeness', label: 'Ledger · Validate capacity values', status: 'pending' },
+      { id: 'support', label: 'Beacon · Identify constrained services', status: 'pending' },
+      { id: 'risk', label: 'Aegis · Check availability source', status: 'pending' },
+      { id: 'decision', label: 'Quill · Prepare a read-only summary', status: 'pending' },
+    ];
+    const runId = `capacity-audit-${Date.now()}`;
+    addAgentRun({
+      id: runId,
+      title: 'Partner capacity snapshot',
+      status: 'running',
+      stages,
+      startedAt: Date.now(),
+    });
+
+    const openReferrals = referrals.filter(referral =>
+      referral.status === 'Pending' || referral.status === 'In Progress',
+    );
+    const activeAgencies = partnerAgencies.filter(agency => agency.status === 'Active');
+    const capacityByType = new Map<string, number>();
+    let totalListedSlots = 0;
+    let invalidCapacityCount = 0;
+    let zeroCapacityCount = 0;
+    let summary = '';
+    const stageDisplayDelay = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 320;
+
+    const runStage = async (stageId: string, check: () => string) => {
+      const activeStages = stages.map(stage => ({
+        ...stage,
+        status: stage.id === stageId ? 'active' as const : stage.status,
+      }));
+      updateAgentRun(runId, { stages: activeStages });
+      await new Promise<void>(resolve => window.requestAnimationFrame(() => resolve()));
+      if (stageDisplayDelay) {
+        await new Promise<void>(resolve => window.setTimeout(resolve, stageDisplayDelay));
+      }
+      const detail = check();
+      const completedStages = stages.map(stage => ({
+        ...stage,
+        status: stage.id === stageId ? 'done' as const : stage.status,
+        detail: stage.id === stageId ? detail : stage.detail,
+      }));
+      stages.splice(0, stages.length, ...completedStages);
+      updateAgentRun(runId, { stages: completedStages });
+      await new Promise<void>(resolve => window.requestAnimationFrame(() => resolve()));
+    };
+
+    try {
+      await runStage('triage', () => `${openReferrals.length} referrals are Pending or In Progress.`);
+      await runStage('docs', () => {
+        for (const agency of activeAgencies) {
+          if (Number.isFinite(agency.availableCapacity) && agency.availableCapacity > 0) {
+            capacityByType.set(agency.type, (capacityByType.get(agency.type) || 0) + agency.availableCapacity);
+            totalListedSlots += agency.availableCapacity;
+          }
+        }
+        return `${activeAgencies.length} active agencies; ${totalListedSlots} positive-capacity slots are listed.`;
+      });
+      await runStage('completeness', () => {
+        invalidCapacityCount = partnerAgencies.filter(agency =>
+          !Number.isFinite(agency.availableCapacity) || agency.availableCapacity < 0,
+        ).length;
+        zeroCapacityCount = activeAgencies.filter(agency => agency.availableCapacity === 0).length;
+        return invalidCapacityCount
+          ? `${invalidCapacityCount} agency capacity value(s) need review.`
+          : `${zeroCapacityCount} active agency/ies list zero capacity; remaining values are valid.`;
+      });
+      await runStage('support', () => {
+        const availableTypes = [...capacityByType.keys()];
+        const unavailableTypes = [...new Set(activeAgencies
+          .filter(agency => agency.availableCapacity === 0)
+          .map(agency => agency.type))];
+        return `${availableTypes.length} service type(s) have listed capacity; zero-capacity active types: ${unavailableTypes.join(', ') || 'none'}.`;
+      });
+      await runStage('risk', () => 'This is stored Bridge360 capacity data; no live partner availability endpoint is connected.');
+      await runStage('decision', () => {
+        summary = `${activeAgencies.filter(agency => agency.availableCapacity > 0).length} active agencies list ${totalListedSlots} slots for ${openReferrals.length} open referral(s).`;
+        return 'Read-only summary prepared. No referrals or partner records were changed.';
+      });
+
+      const resultSummary = `${summary} Stored dashboard data only; confirm availability with partners before placement.`;
+      updateAgentRun(runId, {
+        status: 'completed',
+        resultSummary,
+      });
+      setProactiveMessage(null);
+      setProactiveAction(null);
+      reportActivity('action', 'Completed partner capacity snapshot');
+      playAnimation('nod');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      updateAgentRun(runId, { status: 'error', resultSummary: `Capacity snapshot failed: ${message}` });
+      setProactiveMessage(null);
+      setProactiveAction(null);
+      reportActivity('error', 'Partner capacity snapshot failed');
+      console.error('Partner capacity snapshot failed.', error);
+    }
+  };
 
   const menuItems = [
     { key: 'dashboard', label: t('nav.dashboard', 'Dashboard'), icon: LayoutDashboard },
@@ -100,50 +210,50 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({ onLogout }) => {
                 key={item.key}
                 onClick={() => {
                   setAdminView(item.key as any);
+                  setProactiveMessage(null);
+                  setProactiveAction(null);
                   if (item.key === 'family360') {
                     setSelectedFamilyId(null);
                     setProactiveMessage("Shall I summarize the active caseload and flag urgent families for review?");
                     setProactiveAction([
                       { 
-                        label: 'Okay',
+                        label: 'Summarize caseload',
                         primary: true,
                         onClick: () => { 
-                          setProactiveMessage("I am preparing the summary now!"); 
-                          playAnimation('think'); 
+                          setProactiveMessage(null);
+                          setProactiveAction(null);
+                          dispatchToAssistant('Provide a read-only summary of the active Bridge360 caseload, highlighting aggregate workload and safe next steps. Do not change records or approvals.');
                         } 
                       },
                       {
-                        label: 'Reject',
+                        label: 'No thanks',
                         onClick: () => {
-                          setProactiveMessage("Understood, I'll be here if you need me.");
-                          playAnimation('nod');
+                          setProactiveMessage(null);
+                          setProactiveAction(null);
+                          reportActivity('action', 'Dismissed caseload suggestion');
                         }
                       }
                     ]);
                     playAnimation('wave');
                   } else if (item.key === 'referrals') {
-                    setProactiveMessage("Shall I check for available partner agency slots for the new referrals?");
+                    setProactiveMessage('Shall I review the capacity currently listed for partner agencies? This uses Bridge360 data only; it does not contact partners.');
                     setProactiveAction([
                       { 
-                        label: 'Check Slots',
+                        label: 'Check listed capacity',
                         primary: true,
-                        onClick: () => { 
-                          setProactiveMessage("Checking slots with partners..."); 
-                          playAnimation('think'); 
-                        } 
+                        onClick: () => { void runSlotAvailabilityAudit(); },
                       },
                       {
-                        label: 'Reject',
+                        label: 'No thanks',
                         onClick: () => {
-                          setProactiveMessage("Let me know if you need to check them later.");
-                          playAnimation('nod');
+                          setProactiveMessage(null);
+                          setProactiveAction(null);
+                          reportActivity('action', 'Dismissed referral capacity suggestion');
                         }
                       }
                     ]);
                     playAnimation('point');
                   } else {
-                    // Clear action for other generic tabs
-                    setProactiveAction(null);
                     // Standard greetings
                     if (item.key === 'register') {
                       setProactiveMessage("Ready to guide a new family through registration.");

@@ -2,6 +2,8 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useAssistant, type ChatMessage, type PendingApproval } from '../../store/AssistantContext';
 import { useBridge360 } from '../../store/Bridge360Context';
 import { AssistantService } from '../../services/AssistantService';
+import { GeminiService } from '../../services/GeminiService';
+import { AdminMascotSVG, CustomerMascotSVG, MASCOT_IDLE_GESTURES } from './MascotSVGs';
 import { Send, X, Bot, User, Sparkles, Check, Ban, ShieldCheck, Settings2, Power } from 'lucide-react';
 
 // Module-level id counter so two messages added in the same millisecond can't collide.
@@ -11,7 +13,7 @@ const now = () => new Date().toLocaleTimeString([], { hour: '2-digit', minute: '
 
 export const AssistantChatPanel: React.FC<{ position: { right: number; bottom: number } }> = ({ position }) => {
   const {
-    isOpen, setIsOpen, portal, screenContext,
+    isOpen, setIsOpen, portal, screenContext, guideTarget, mascotMode,
     assistantEnabled, setAssistantEnabled,
     messages, addMessage, updateMessage,
     triggerAction, reportActivity,
@@ -23,15 +25,36 @@ export const AssistantChatPanel: React.FC<{ position: { right: number; bottom: n
   const { language, t } = useBridge360();
 
   const [inputText, setInputText] = useState('');
+  const [companionAnimation, setCompanionAnimation] = useState(() =>
+    MASCOT_IDLE_GESTURES[Math.floor(Math.random() * MASCOT_IDLE_GESTURES.length)],
+  );
+  const [companionAnimationKey, setCompanionAnimationKey] = useState(0);
   const [assistantSettingsOpen, setAssistantSettingsOpen] = useState(false);
-  const [viewport, setViewport] = useState(() => ({ width: window.innerWidth, height: window.innerHeight }));
+  const [viewport, setViewport] = useState(() => ({
+    width: document.documentElement.clientWidth,
+    height: document.documentElement.clientHeight,
+  }));
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const handledKeyRef = useRef(0);
 
   useEffect(() => {
-    const updateViewport = () => setViewport({ width: window.innerWidth, height: window.innerHeight });
+    const updateViewport = () => setViewport({
+      width: document.documentElement.clientWidth,
+      height: document.documentElement.clientHeight,
+    });
     window.addEventListener('resize', updateViewport);
     return () => window.removeEventListener('resize', updateViewport);
+  }, []);
+
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout>;
+    const chooseGesture = () => {
+      setCompanionAnimation(MASCOT_IDLE_GESTURES[Math.floor(Math.random() * MASCOT_IDLE_GESTURES.length)]);
+      setCompanionAnimationKey(key => key + 1);
+      timer = setTimeout(chooseGesture, 2600 + Math.random() * 1800);
+    };
+    timer = setTimeout(chooseGesture, 1800);
+    return () => clearTimeout(timer);
   }, []);
 
   const scrollToBottom = () => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -105,23 +128,22 @@ export const AssistantChatPanel: React.FC<{ position: { right: number; bottom: n
   const title = isCustomer
     ? t('assistant.customerTitle', 'Bridge360 Guide')
     : t('assistant.adminTitle', 'AI Intern Assistant');
+  const ChatMascot = isCustomer ? CustomerMascotSVG : AdminMascotSVG;
   const rtl = language === 'ar' || language === 'fa';
-  const isMobile = viewport.width <= 500;
-  const mobileAboveSpace = viewport.height - position.bottom - 318;
-  const mobileBelowSpace = position.bottom + 82;
-  const placePanelAboveDock = mobileAboveSpace >= mobileBelowSpace;
+  const panelWidth = Math.min(320, viewport.width - 24);
+  const launcherCenter = viewport.width - position.right - 80;
+  const panelRight = Math.min(
+    Math.max(12, viewport.width - launcherCenter - panelWidth / 2),
+    Math.max(12, viewport.width - panelWidth - 12),
+  );
+  const panelBottom = Math.min(position.bottom + 96, Math.max(12, viewport.height - 120));
+  const panelMaxHeight = Math.max(180, Math.min(390, viewport.height - panelBottom - 12));
   const panelStyle: React.CSSProperties = {
     position: 'fixed',
-    bottom: isMobile
-      ? `${placePanelAboveDock ? position.bottom + 306 : 12}px`
-      : `${Math.min(position.bottom + 75, Math.max(12, viewport.height - 506))}px`,
-    right: isMobile
-      ? '12px'
-      : `${Math.min(position.right + 165, Math.max(12, viewport.width - 382))}px`,
-    width: 'min(370px, calc(100vw - 185px))',
-    maxHeight: isMobile
-      ? `${Math.max(80, Math.min(490, viewport.height - 100, placePanelAboveDock ? mobileAboveSpace : mobileBelowSpace))}px`
-      : 'min(490px, calc(100vh - 100px))',
+    bottom: `${panelBottom}px`,
+    right: `${panelRight}px`,
+    width: `${panelWidth}px`,
+    maxHeight: `${panelMaxHeight}px`,
   };
 
   const handleSend = (e?: React.FormEvent) => {
@@ -163,7 +185,7 @@ export const AssistantChatPanel: React.FC<{ position: { right: number; bottom: n
   };
 
   const sourceBadge = (src?: ChatMessage['source']) => {
-    if (!src) return null;
+    if (!src || src === 'gemini') return null;
     const map = {
       servicenow: { label: t('assistant.srcSn', 'ServiceNow AI'), color: '#22C55E', icon: true },
       gemini: { label: t('assistant.srcGemini', 'Gemini'), color: '#38BDF8', icon: false },
@@ -184,19 +206,47 @@ export const AssistantChatPanel: React.FC<{ position: { right: number; bottom: n
       dir={rtl ? 'rtl' : 'ltr'}
       style={{
         ...panelStyle,
-        background: panelBg,
-        backdropFilter: 'blur(16px)',
-        borderRadius: '20px',
-        border: `1px solid ${accent}30`,
-        boxShadow: `0 20px 60px rgba(0,0,0,.35), 0 0 40px ${accent}10, inset 0 0 60px ${accent}05`,
+        isolation: 'isolate',
         zIndex: 9998,
-        display: 'flex', flexDirection: 'column', overflow: 'hidden',
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'visible',
+        pointerEvents: 'none',
         animation: 'doubtbox-in .35s cubic-bezier(.16,1,.3,1) forwards',
       }}
     >
+      <div className="b360-chat-companion" aria-hidden="true" style={{
+        position: 'absolute', top: '-54px', right: '8px',
+        width: '54px', height: '68px',
+        display: guideTarget && mascotMode === 'moving' ? 'none' : 'flex',
+        alignItems: 'center', justifyContent: 'center',
+        borderRadius: '50%',
+        background: `radial-gradient(ellipse, ${accent}30 0%, ${accent}0A 48%, transparent 74%)`,
+        filter: `drop-shadow(0 0 8px ${accent}70)`,
+        pointerEvents: 'none',
+        zIndex: 2,
+      }}>
+        <ChatMascot
+          animation={isThinking ? 'think' : companionAnimation}
+          animationKey={companionAnimationKey}
+        />
+      </div>
+      <div style={{
+        display: 'flex',
+        flexDirection: 'column',
+        minHeight: 0,
+        maxHeight: 'inherit',
+        overflow: 'hidden',
+        pointerEvents: 'auto',
+        background: panelBg,
+        backdropFilter: 'blur(16px)',
+        borderRadius: '18px',
+        border: `1px solid ${accent}30`,
+        boxShadow: `0 20px 60px rgba(0,0,0,.38), 0 0 34px ${accent}22, inset 0 0 60px ${accent}08`,
+      }}>
       {/* Header — glassy strip */}
       <div style={{
-        padding: '14px 18px',
+        padding: '11px 14px',
         display: 'flex', justifyContent: 'space-between', alignItems: 'center',
         borderBottom: `1px solid ${accent}20`,
         background: `${accent}08`,
@@ -274,7 +324,7 @@ export const AssistantChatPanel: React.FC<{ position: { right: number; bottom: n
 
       {/* Messages */}
       <div style={{
-        flex: 1, overflowY: 'auto', padding: '16px',
+        flex: 1, minHeight: 0, overflowY: 'auto', padding: '12px',
         display: 'flex', flexDirection: 'column', gap: '12px',
         scrollbarWidth: 'thin',
         scrollbarColor: `${accent}30 transparent`,
@@ -397,7 +447,7 @@ export const AssistantChatPanel: React.FC<{ position: { right: number; bottom: n
 
       {/* Input — pill style "what's your doubt mate?" */}
       <div style={{
-        padding: '12px 14px',
+        padding: '9px 11px',
         borderTop: `1px solid ${accent}15`,
         background: `${accent}05`,
       }}>
@@ -449,12 +499,13 @@ export const AssistantChatPanel: React.FC<{ position: { right: number; bottom: n
           </button>
         </form>
         <div style={{
-          textAlign: 'center', marginTop: '8px',
+          textAlign: 'center', marginTop: '5px',
           fontSize: '0.6rem', color: '#475569',
         }}>
           {t('assistant.poweredBy', 'Powered by ServiceNow AI')}
           <span style={{ color: accent }}> • Bridge360</span>
         </div>
+      </div>
       </div>
 
       <style>{`
@@ -462,6 +513,9 @@ export const AssistantChatPanel: React.FC<{ position: { right: number; bottom: n
           background-color: rgba(255, 255, 255, 0.05) !important;
           color: #F1F5F9 !important;
           -webkit-text-fill-color: #F1F5F9 !important;
+          caret-color: #F1F5F9 !important;
+          user-select: text !important;
+          -webkit-user-select: text !important;
         }
         .b360-chat-input-text::placeholder {
           color: #94A3B8 !important;
@@ -479,15 +533,11 @@ export const AssistantChatPanel: React.FC<{ position: { right: number; bottom: n
         .typing-indicator span:nth-child(1) { animation-delay: -0.32s; }
         .typing-indicator span:nth-child(2) { animation-delay: -0.16s; }
         @keyframes bounce { 0%, 80%, 100% { transform: scale(0); } 40% { transform: scale(1); } }
-        @media (max-width: 900px) {
-          .b360-assistant-doubtbox {
-            width: min(370px, calc(100vw - 185px)) !important;
-          }
-        }
-        @media (max-width: 500px) {
-          .b360-assistant-doubtbox {
-            right: 12px !important;
-            width: calc(100vw - 40px) !important;
+        @media (prefers-reduced-motion: reduce) {
+          .b360-chat-companion,
+          .b360-chat-companion * {
+            animation: none !important;
+            transition: none !important;
           }
         }
       `}</style>

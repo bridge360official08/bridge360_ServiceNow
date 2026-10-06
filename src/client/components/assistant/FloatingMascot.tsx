@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useAssistant, type AssistantGuideTarget, type MascotMode, type MascotAnimation, type AgentRun } from '../../store/AssistantContext';
-import { CustomerMascotSVG, AdminMascotSVG } from './MascotSVGs';
+import { CustomerMascotSVG, AdminMascotSVG, MASCOT_IDLE_GESTURES } from './MascotSVGs';
 import {
   AlertTriangle,
   CheckCircle,
@@ -93,12 +93,40 @@ const HOLO_CSS = `
 @keyframes mascot-fly-return {
   0% { transform: translate3d(var(--flight-x), var(--flight-y), 0) rotate(var(--flight-angle)); }
   48% { transform: translate3d(calc(var(--flight-x) * .55), calc(var(--flight-y) * .55), 0) rotate(calc(var(--flight-angle) + 180deg)); }
-  100% { transform: translate3d(0, 0, 0) rotate(360deg); }
+  100% { transform: translate3d(0, 0, 0) rotate(0deg); }
 }
 @keyframes mascot-flight-body {
+  0%,100% { transform: rotate(0) translateY(0) scale(1); }
+  28% { transform: rotate(-9deg) translateY(-5px) scale(1.015); }
+  58% { transform: rotate(8deg) translateY(-10px) scale(.99); }
+  82% { transform: rotate(-4deg) translateY(-3px) scale(1.01); }
+}
+@keyframes mascot-flight-return-body {
   0%,100% { transform: rotate(0) translateY(0); }
-  35% { transform: rotate(-8deg) translateY(-7px); }
-  70% { transform: rotate(7deg) translateY(-4px); }
+  22% { transform: rotate(-12deg) translateY(-6px); }
+  48% { transform: rotate(8deg) translateY(-9px) scale(1.02); }
+  76% { transform: rotate(-5deg) translateY(-3px); }
+}
+@keyframes mascot-work-screen {
+  0%,100% { opacity: .72; transform: translateY(2px) scale(.96); }
+  50% { opacity: 1; transform: translateY(-3px) scale(1); }
+}
+@keyframes mascot-work-chart {
+  0%,100% { stroke-dashoffset: 28; }
+  50% { stroke-dashoffset: 0; }
+}
+@keyframes b360-mini-work-hop {
+  0%,100% { transform: translateY(0) rotate(0); }
+  35% { transform: translateY(-7px) rotate(-7deg); }
+  68% { transform: translateY(1px) rotate(5deg); }
+}
+@keyframes b360-mini-work-arm {
+  0%,100% { transform: rotate(0); }
+  50% { transform: rotate(-28deg); }
+}
+@keyframes b360-mini-work-thrust {
+  0%,100% { opacity: .5; transform: scaleY(.65); }
+  45% { opacity: 1; transform: scaleY(1.45); }
 }
 @keyframes bubble-in-right {
   0%{opacity:0;transform:translateY(14px) scale(.9)}
@@ -111,14 +139,6 @@ const HOLO_CSS = `
 @keyframes work-pulse {
   0%,100%{box-shadow:0 0 0 0 rgba(0,245,212,.4)}
   50%{box-shadow:0 0 16px 4px rgba(0,245,212,.25)}
-}
-@keyframes b360-agent-orbit {
-  from { transform: rotate(var(--agent-angle)) translateX(48px); }
-  to { transform: rotate(calc(var(--agent-angle) + 360deg)) translateX(48px); }
-}
-@keyframes b360-agent-upright {
-  from { transform: rotate(var(--agent-counter-angle)); }
-  to { transform: rotate(calc(var(--agent-counter-angle) - 360deg)); }
 }
 @keyframes b360-agent-glow {
   0%,100% { filter: drop-shadow(0 0 5px var(--agent-color)); }
@@ -154,7 +174,19 @@ const HOLO_CSS = `
 .b360-mascot-flight .rig-leg-l { animation: rig-kick-l .5s ease-in-out infinite alternate; }
 .b360-mascot-flight .rig-leg-r { animation: rig-kick-r .5s ease-in-out infinite alternate; }
 .b360-mascot-flight[data-flight="out"] { transition: transform 1.15s cubic-bezier(.2,.8,.2,1); }
-.b360-mascot-flight[data-flight="return"] { animation: mascot-fly-return 1.35s cubic-bezier(.4,0,.2,1) forwards; }
+.b360-mascot-flight[data-flight="return"] { animation: mascot-fly-return 1.5s cubic-bezier(.4,0,.2,1) forwards; }
+.b360-mascot-flight[data-flight="return"] .rig-root { animation: mascot-flight-return-body 1.5s cubic-bezier(.4,0,.2,1) forwards; }
+.b360-mascot-flight .b360-boot-thruster { animation: flight-thrust .24s ease-in-out infinite alternate; }
+@keyframes flight-thrust {
+  from { opacity: .42; transform: scaleY(.72); }
+  to { opacity: 1; transform: scaleY(1.35); }
+}
+svg[data-skin="admin"][data-anim="work"] .rig-work-displays { opacity: 1; }
+svg[data-skin="admin"][data-anim="work"] .rig-work-screen-a { animation: mascot-work-screen 1.5s ease-in-out infinite; }
+svg[data-skin="admin"][data-anim="work"] .rig-work-screen-b { animation: mascot-work-screen 1.8s ease-in-out .3s infinite; }
+svg[data-skin="admin"][data-anim="work"] .rig-work-chart { animation: mascot-work-chart 1.3s ease-in-out infinite; }
+svg[data-skin="admin"][data-anim="work"] .rig-arm-r { animation: rig-wave .85s ease-in-out infinite alternate; }
+svg[data-skin="admin"][data-anim="work"] .rig-arm-l { animation: rig-stretch-l 1.1s ease-in-out infinite alternate; }
 @media (prefers-reduced-motion: reduce) {
   .b360-assistant-motion,
   .b360-assistant-motion *,
@@ -203,13 +235,6 @@ const ADVISORY_ROLES: AdvisoryRole[] = [
   { stageId: 'decision', name: 'Quill', role: 'Decision draft', color: '#F97316', icon: Lightbulb },
 ];
 
-const ADVISORY_GESTURES: MascotAnimation[] = [
-  'idle-wave', 'idle-listen', 'idle-stretch', 'idle-sway', 'idle-twirl',
-  'idle-bounce', 'idle-kick', 'idle-look', 'idle-salute', 'idle-dance',
-  'idle-skate', 'idle-cape', 'idle-spin', 'idle-shrug', 'idle-peek',
-  'idle-cheer', 'idle-moonwalk', 'idle-juggle', 'idle-spinbow', 'idle-heart',
-];
-
 const MINI_MASCOT_CSS = `
 @keyframes b360-mini-thrust {
   0%,100% { opacity: .45; transform: scaleY(.65); }
@@ -217,83 +242,226 @@ const MINI_MASCOT_CSS = `
 }
 @keyframes b360-mini-arm-wave {
   0%,100% { transform: rotate(0deg); }
-  50% { transform: rotate(-38deg); }
+  50% { transform: rotate(-42deg); }
 }
 @keyframes b360-mini-leg-step {
-  0%,100% { transform: translateY(0); }
-  50% { transform: translateY(-2px); }
+  0%,100% { transform: rotate(0deg); }
+  50% { transform: rotate(-18deg); }
 }
+@keyframes b360-mini-float { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-2px); } }
+@keyframes b360-mini-sway { 0%,100% { transform: rotate(-7deg); } 50% { transform: rotate(7deg); } }
+@keyframes b360-mini-twirl {
+  0% { transform: perspective(55px) rotateY(0deg); }
+  25% { transform: perspective(55px) rotateY(90deg); }
+  50% { transform: perspective(55px) rotateY(180deg); }
+  75% { transform: perspective(55px) rotateY(270deg); }
+  100% { transform: perspective(55px) rotateY(360deg); }
+}
+@keyframes b360-mini-spin {
+  0% { transform: perspective(55px) rotateY(0deg); }
+  25% { transform: perspective(55px) rotateY(90deg); }
+  50% { transform: perspective(55px) rotateY(180deg); }
+  75% { transform: perspective(55px) rotateY(270deg); }
+  100% { transform: perspective(55px) rotateY(360deg); }
+}
+@keyframes b360-mini-bounce { 0%,100% { transform: translateY(0) scale(1); } 45% { transform: translateY(-7px) scale(1.05); } 72% { transform: translateY(-1px) scale(1.01); } }
+@keyframes b360-mini-stretch-left { 0%,100% { transform: rotate(0); } 50% { transform: rotate(34deg); } }
+@keyframes b360-mini-stretch-right { 0%,100% { transform: rotate(0); } 50% { transform: rotate(-34deg); } }
+@keyframes b360-mini-skate-push-left {
+  0%,100% { transform: rotate(0); }
+  28% { transform: rotate(-36deg) translateY(2px); }
+  54% { transform: rotate(8deg); }
+}
+@keyframes b360-mini-skate-push-right {
+  0%,100% { transform: rotate(0); }
+  62% { transform: rotate(0); }
+  84% { transform: rotate(36deg) translateY(2px); }
+}
+@keyframes b360-mini-skate-balance { 0%,100% { transform: rotate(0); } 50% { transform: rotate(-22deg); } }
+@keyframes b360-mini-skate-board { 0%,100% { transform: translateX(0) rotate(0); } 30% { transform: translateX(-4px) rotate(-4deg); } 70% { transform: translateX(4px) rotate(4deg); } }
+@keyframes b360-mini-dance { 0%,100% { transform: translateY(0) rotate(-6deg); } 25% { transform: translateY(-5px) rotate(8deg); } 50% { transform: translateY(0) rotate(-8deg); } 75% { transform: translateY(-4px) rotate(6deg); } }
+@keyframes b360-mini-dance-left { 0%,100% { transform: rotate(-5deg); } 25%,75% { transform: rotate(22deg); } 50% { transform: rotate(-14deg); } }
+@keyframes b360-mini-dance-right { 0%,100% { transform: rotate(5deg); } 25%,75% { transform: rotate(-20deg); } 50% { transform: rotate(14deg); } }
+@keyframes b360-mini-wheel-roll { to { transform: rotate(360deg); } }
+@keyframes b360-mini-look { 0%,100% { transform: rotate(0); } 35% { transform: rotate(-12deg); } 70% { transform: rotate(10deg); } }
+@keyframes b360-mini-peek { 0%,100% { transform: translateX(0) rotate(0); } 45% { transform: translateX(-4px) rotate(-12deg); } }
+@keyframes b360-mini-skate { 0%,100% { transform: translateX(0) rotate(0); } 35% { transform: translateX(-6px) rotate(-7deg); } 70% { transform: translateX(6px) rotate(7deg); } }
+@keyframes b360-mini-moonwalk { 0%,100% { transform: translateX(0); } 25% { transform: translateX(6px); } 75% { transform: translateX(-6px); } }
+@keyframes b360-mini-juggle-ball { 0%,100% { transform: translateY(4px); } 50% { transform: translateY(-8px); } }
+@keyframes b360-mini-heart { 0%,100% { transform: scale(1); } 35% { transform: scale(1.18); } 65% { transform: scale(.94); } }
+@keyframes b360-mini-bow { 0%,100% { transform: rotate(0); } 45%,70% { transform: rotate(16deg); } }
+@keyframes b360-mini-cape { 0%,100% { transform: skewX(0) rotate(0); } 50% { transform: skewX(-18deg) rotate(8deg); } }
+@keyframes b360-mini-orbital-hover-left { 0%,100% { transform: translate(0,0) rotate(-3deg); } 50% { transform: translate(-2px,-7px) rotate(3deg); } }
+@keyframes b360-mini-orbital-hover-right { 0%,100% { transform: translate(0,-3px) rotate(3deg); } 50% { transform: translate(2px,4px) rotate(-3deg); } }
+@keyframes b360-mini-work-hop {
+  0%,100% { transform: translate(0,0) rotate(0); }
+  35% { transform: translate(4px,-8px) rotate(-8deg); }
+  68% { transform: translate(-3px,1px) rotate(6deg); }
+}
+@keyframes b360-mini-work-arm { 0%,100% { transform: rotate(0); } 50% { transform: rotate(-36deg); } }
+@keyframes b360-mini-work-thrust { 0%,100% { opacity: .5; transform: scaleY(.65); } 45% { opacity: 1; transform: scaleY(1.45); } }
+.b360-mini-root,
+.b360-mini-arm-left,
+.b360-mini-arm-right,
+.b360-mini-left-leg,
+.b360-mini-right-leg,
+.b360-mini-head,
+.b360-mini-cape,
+.b360-mini-board,
+.b360-mini-orbs,
+.b360-mini-heart {
+  transform-box: fill-box;
+}
+.b360-mini-root { transform-origin: center bottom; transform-style: preserve-3d; }
+.b360-mini-arm-left,
+.b360-mini-arm-right { transform-origin: center top; }
+.b360-mini-left-leg,
+.b360-mini-right-leg { transform-origin: center top; }
+.b360-mini-head { transform-origin: center bottom; }
+.b360-mini-cape { transform-origin: top center; }
 .b360-mini-thruster { transform-box: fill-box; transform-origin: center top; animation: b360-mini-thrust .42s ease-in-out infinite; }
-[data-agent-gesture="idle-wave"] .b360-mini-arm-right,
-[data-agent-gesture="idle-salute"] .b360-mini-arm-right { transform-box: fill-box; transform-origin: left center; animation: b360-mini-arm-wave .55s ease-in-out infinite alternate; }
-[data-agent-gesture="idle-cheer"] .b360-mini-arm-left,
-[data-agent-gesture="idle-cheer"] .b360-mini-arm-right,
-[data-agent-gesture="idle-dance"] .b360-mini-arm-left,
-[data-agent-gesture="idle-dance"] .b360-mini-arm-right { transform-box: fill-box; transform-origin: center; animation: b360-mini-arm-wave .5s ease-in-out infinite alternate; }
-[data-agent-gesture="idle-kick"] .b360-mini-right-leg,
-[data-agent-gesture="idle-skate"] .b360-mini-right-leg,
-[data-agent-gesture="idle-moonwalk"] .b360-mini-left-leg { transform-box: fill-box; transform-origin: center top; animation: b360-mini-leg-step .45s ease-in-out infinite alternate; }
-${ADVISORY_GESTURES.map((gesture, index) =>
-  `[data-agent-gesture="${gesture}"]{animation:b360-mini-motion-${index} .9s ease-in-out infinite}` +
-  `@keyframes b360-mini-motion-${index}{0%,100%{transform:${index % 2 ? 'translateY(0) rotate(-5deg)' : 'scale(1)'}}50%{transform:${index % 2 ? `translateY(-${3 + index % 5}px) rotate(7deg)` : `rotate(${(index + 1) * 18}deg) scale(1.12)`}}}`,
-).join('\n')}
+.b360-mini-board,
+.b360-mini-cape,
+.b360-mini-orbs,
+.b360-mini-heart,
+.b360-mini-soundmarks { opacity: 0; }
+.b360-mini-torso { transform-box: fill-box; transform-origin: center; animation: b360-mini-float 3.2s ease-in-out infinite; }
+[data-agent-gesture="idle-wave"] .b360-mini-arm-right { animation: b360-mini-arm-wave .55s ease-in-out 3; }
+[data-agent-gesture="idle-listen"] .b360-mini-head { animation: b360-mini-look .8s ease-in-out 2; }
+[data-agent-gesture="idle-listen"] .b360-mini-soundmarks { opacity: 1; animation: b360-mini-float .65s ease-in-out infinite; }
+[data-agent-gesture="idle-stretch"] .b360-mini-arm-left { animation: b360-mini-stretch-left .8s ease-in-out 2; }
+[data-agent-gesture="idle-stretch"] .b360-mini-arm-right { animation: b360-mini-stretch-right .8s ease-in-out 2; }
+[data-agent-gesture="idle-sway"] .b360-mini-root { animation: b360-mini-sway 1.2s ease-in-out 2; }
+[data-agent-gesture="idle-twirl"] .b360-mini-root { animation: b360-mini-twirl 1.1s ease-in-out 2; }
+[data-agent-gesture="idle-bounce"] .b360-mini-root { animation: b360-mini-bounce .8s ease-in-out 2; }
+[data-agent-gesture="idle-kick"] .b360-mini-left-leg { animation: b360-mini-leg-step .55s ease-in-out 2; }
+[data-agent-gesture="idle-kick"] .b360-mini-right-leg { animation: b360-mini-leg-step .55s ease-in-out 2 reverse; }
+[data-agent-gesture="idle-look"] .b360-mini-head { animation: b360-mini-look .7s ease-in-out 3; }
+[data-agent-gesture="idle-look"] .b360-mini-eye-left { animation: b360-mini-look .55s ease-in-out 3; }
+[data-agent-gesture="idle-look"] .b360-mini-eye-right { animation: b360-mini-look .55s ease-in-out 3 reverse; }
+[data-agent-gesture="idle-salute"] .b360-mini-arm-right { animation: b360-mini-arm-wave .7s ease-in-out 2; }
+[data-agent-gesture="idle-dance"] .b360-mini-root { animation: b360-mini-dance .65s ease-in-out 4; }
+[data-agent-gesture="idle-dance"] .b360-mini-arm-left { animation: b360-mini-stretch-left .55s ease-in-out 4; }
+[data-agent-gesture="idle-dance"] .b360-mini-arm-right { animation: b360-mini-stretch-right .55s ease-in-out 4; }
+[data-agent-gesture="idle-dance"] .b360-mini-left-leg { animation: b360-mini-dance-left .65s ease-in-out 4; }
+[data-agent-gesture="idle-dance"] .b360-mini-right-leg { animation: b360-mini-dance-right .65s ease-in-out 4; }
+[data-agent-gesture="idle-skate"] .b360-mini-root { animation: b360-mini-skate .7s ease-in-out 3; }
+[data-agent-gesture="idle-skate"] .b360-mini-left-leg { animation: b360-mini-skate-push-left .7s ease-in-out 3; }
+[data-agent-gesture="idle-skate"] .b360-mini-right-leg { animation: b360-mini-skate-push-right .7s ease-in-out 3; }
+[data-agent-gesture="idle-skate"] .b360-mini-arm-left { animation: b360-mini-skate-balance .7s ease-in-out 3; }
+[data-agent-gesture="idle-skate"] .b360-mini-arm-right { animation: b360-mini-skate-balance .7s ease-in-out 3 reverse; }
+[data-agent-gesture="idle-skate"] .b360-mini-board { opacity: 1; }
+[data-agent-gesture="idle-skate"] .b360-mini-board { animation: b360-mini-skate-board .7s ease-in-out 3; }
+[data-agent-gesture="idle-skate"] .b360-mini-board circle { transform-box: fill-box; transform-origin: center; animation: b360-mini-wheel-roll .3s linear 7; }
+[data-agent-gesture="idle-cape"] .b360-mini-cape { opacity: 1; animation: b360-mini-cape .65s ease-in-out 4; }
+[data-agent-gesture="idle-spin"] .b360-mini-root { animation: b360-mini-spin 1s ease-in-out 2; }
+[data-agent-gesture="idle-shrug"] .b360-mini-arm-left { animation: b360-mini-stretch-left .7s ease-in-out 2; }
+[data-agent-gesture="idle-shrug"] .b360-mini-arm-right { animation: b360-mini-stretch-right .7s ease-in-out 2; }
+[data-agent-gesture="idle-peek"] .b360-mini-head { animation: b360-mini-peek .7s ease-in-out 2; }
+[data-agent-gesture="idle-cheer"] .b360-mini-root { animation: b360-mini-bounce .75s ease-in-out 3; }
+[data-agent-gesture="idle-cheer"] .b360-mini-arm-left { animation: b360-mini-stretch-left .6s ease-in-out 3; }
+[data-agent-gesture="idle-cheer"] .b360-mini-arm-right { animation: b360-mini-stretch-right .6s ease-in-out 3; }
+[data-agent-gesture="idle-moonwalk"] .b360-mini-root { animation: b360-mini-moonwalk .75s ease-in-out 3; }
+[data-agent-gesture="idle-moonwalk"] .b360-mini-left-leg { animation: b360-mini-leg-step .5s ease-in-out 3; }
+[data-agent-gesture="idle-moonwalk"] .b360-mini-right-leg { animation: b360-mini-leg-step .5s ease-in-out 3 reverse; }
+[data-agent-gesture="idle-juggle"] .b360-mini-orbs { opacity: 1; }
+[data-agent-gesture="idle-juggle"] .b360-mini-orb-a { animation: b360-mini-juggle-ball .55s ease-in-out infinite; }
+[data-agent-gesture="idle-juggle"] .b360-mini-orb-b { animation: b360-mini-juggle-ball .55s ease-in-out .18s infinite reverse; }
+[data-agent-gesture="idle-juggle"] .b360-mini-orb-c { animation: b360-mini-juggle-ball .55s ease-in-out .36s infinite; }
+[data-agent-gesture="idle-spinbow"] .b360-mini-root { animation: b360-mini-spin .9s ease-in-out 1; }
+[data-agent-gesture="idle-spinbow"] .b360-mini-head { animation: b360-mini-bow .6s ease-in-out 2 1.3s; }
+[data-agent-gesture="idle-heart"] .b360-mini-heart { opacity: 1; animation: b360-mini-heart .7s ease-in-out 3; }
+[data-agent-working="true"] .b360-mini-root { animation: b360-mini-work-hop .7s ease-in-out infinite; }
+[data-agent-working="true"] .b360-mini-arm-right { animation: b360-mini-work-arm .38s ease-in-out infinite alternate; }
+[data-agent-working="true"] .b360-mini-thruster { animation: b360-mini-work-thrust .25s ease-in-out infinite alternate; }
+.b360-mini-hover-left { animation: b360-mini-orbital-hover-left 2.8s ease-in-out infinite; }
+.b360-mini-hover-right { animation: b360-mini-orbital-hover-right 3s ease-in-out infinite; }
 `;
 
 const MiniAdvisoryMascot: React.FC<{
   color: string;
   icon: React.ReactNode;
   role: AdvisoryStageId;
-}> = ({ color, icon, role }) => {
+  isWorking: boolean;
+  className?: string;
+}> = ({ color, icon, role, isWorking, className }) => {
   const [gesture, setGesture] = useState<MascotAnimation>(() =>
-    ADVISORY_GESTURES[Math.floor(Math.random() * ADVISORY_GESTURES.length)],
+    MASCOT_IDLE_GESTURES[Math.floor(Math.random() * MASCOT_IDLE_GESTURES.length)],
   );
 
   useEffect(() => {
+    if (isWorking) return undefined;
     let timer: ReturnType<typeof setTimeout>;
     const chooseNextGesture = () => {
-      setGesture(ADVISORY_GESTURES[Math.floor(Math.random() * ADVISORY_GESTURES.length)]);
-      timer = setTimeout(chooseNextGesture, 1300 + Math.random() * 1100);
+      setGesture(previous => {
+        const options = MASCOT_IDLE_GESTURES.filter(animation => animation !== previous);
+        return options[Math.floor(Math.random() * options.length)];
+      });
+      timer = setTimeout(chooseNextGesture, 4200 + Math.random() * 2400);
     };
-    timer = setTimeout(chooseNextGesture, 1300 + Math.random() * 1100);
+    timer = setTimeout(chooseNextGesture, 4200 + Math.random() * 2400);
     return () => clearTimeout(timer);
-  }, []);
+  }, [isWorking]);
 
   const headgear = {
-    triage: <><path d="M9 12Q11 5 18 5Q25 5 27 12H9Z" fill={color} /><path d="M7 12H29L26 15H10Z" fill="#E0F2FE" /></>,
-    docs: <><path d="M10 11Q13 5 18 5Q23 5 26 11V14H10Z" fill={color} /><path d="M10 12H26V15H10Z" fill="#F5F3FF" opacity=".9" /></>,
-    completeness: <><path d="M10 11Q11 5 18 5Q25 5 26 11V13H10Z" fill={color} /><path d="M14 8H22" stroke="#FEF3C7" strokeWidth="1.5" /></>,
-    support: <><path d="M10 13V11A8 8 0 0 1 26 11V13" fill="none" stroke={color} strokeWidth="3" /><circle cx="10" cy="14" r="2.5" fill="#FFE4E6" /><circle cx="26" cy="14" r="2.5" fill="#FFE4E6" /></>,
-    risk: <><path d="M18 4L26 8V13Q25 18 18 20Q11 18 10 13V8Z" fill={color} /><path d="M18 7L23 9.5V13Q22 16 18 17.5Q14 16 13 13V9.5Z" fill="#D1FAE5" /></>,
-    decision: <><path d="M19 12Q25 4 28 5Q28 12 20 15" fill={color} /><path d="M19 13Q22 7 27 6" fill="none" stroke="#FFEDD5" strokeWidth="1" /></>,
+    triage: <><path d="M9 12Q11 5 18 5Q25 5 27 12H9Z" fill={color} /><path d="M7 12H29L26 15H10Z" fill="#E0F2FE" /><path d="M18 5V1" stroke="#E0F2FE" strokeWidth="1.5" /><circle cx="18" cy="1.5" r="1.5" fill="#FDE68A" /></>,
+    docs: <><path d="M18 3L27 12L18 16L9 12Z" fill={color} stroke="#F5F3FF" strokeWidth="1.5" /><path d="M18 5V14M11 12L18 15L25 12" fill="none" stroke="#FFFFFF" strokeWidth="1" /></>,
+    completeness: <><rect x="9" y="5" width="18" height="10" rx="3" fill={color} /><path d="M13 8L15 10L18 7M20 8H24M13 12L15 14L18 11M20 12H24" fill="none" stroke="#FEF3C7" strokeWidth="1.2" /></>,
+    support: <><path d="M10 13V11A8 8 0 0 1 26 11V13" fill="none" stroke={color} strokeWidth="3" /><circle cx="10" cy="14" r="2.5" fill="#FFE4E6" /><circle cx="26" cy="14" r="2.5" fill="#FFE4E6" /><path d="M18 7V12M15.5 9.5H20.5" stroke="#FFFFFF" strokeWidth="1.5" /></>,
+    risk: <><path d="M18 3L27 7V12Q25 18 18 20Q11 18 9 12V7Z" fill={color} stroke="#D1FAE5" strokeWidth="1" /><path d="M18 7L22 9V12Q21 15 18 16Q15 15 14 12V9Z" fill="#D1FAE5" /></>,
+    decision: <><path d="M19 12Q25 4 28 5Q28 12 20 15" fill={color} /><path d="M19 13Q22 7 27 6" fill="none" stroke="#FFEDD5" strokeWidth="1" /><path d="M9 8L12 5L14 7L11 10Z" fill="#FFFFFF" stroke={color} strokeWidth="1" /></>,
   }[role];
 
   return (
-    <div data-agent-gesture={gesture} style={{
+    <div className={className} data-agent-gesture={isWorking ? 'work' : gesture} data-agent-working={isWorking ? 'true' : undefined} data-agent-role={role} style={{
       width: '34px',
       height: '48px',
       position: 'relative',
       filter: `drop-shadow(0 0 4px ${color}99)`,
     }}>
       <svg aria-hidden="true" viewBox="0 0 36 52" width="34" height="48" style={{ overflow: 'visible' }}>
-        <ellipse cx="18" cy="48" rx="9" ry="2" fill={color} opacity=".45" />
-        <path d="M13 42L12 47M23 42L24 47" stroke={color} strokeWidth="2" strokeLinecap="round" className="b360-mini-thruster" />
-        <path className="b360-mini-left-leg" d="M13 35L12 43H16L18 36" fill="#172554" stroke="#BFDBFE" strokeWidth="1" strokeLinejoin="round" />
-        <path className="b360-mini-right-leg" d="M23 35L24 43H20L18 36" fill="#172554" stroke="#BFDBFE" strokeWidth="1" strokeLinejoin="round" />
-        <path d="M12 22Q18 19 24 22L27 36Q18 39 9 36Z" fill={color} stroke="#E0F2FE" strokeWidth="1" />
-        <g className="b360-mini-arm-left">
-          <path d="M12 24L6 30L9 32L14 28" fill="none" stroke="#F8FAFC" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-          <circle cx="6" cy="30" r="2" fill="#FDE68A" />
+        <g className="b360-mini-root">
+          <path className="b360-mini-cape" d="M12 23L7 39L16 35L18 40L21 35L29 39L24 23Z" fill={color} stroke="#E0F2FE" strokeWidth=".8" opacity=".88" />
+          <g className="b360-mini-board">
+            <path d="M5 45Q18 42 31 45L29 48Q18 50 7 48Z" fill="#DCE7FF" stroke={color} strokeWidth="1" />
+            <circle cx="10" cy="49" r="1.4" fill="#FDE68A" />
+            <circle cx="26" cy="49" r="1.4" fill="#FDE68A" />
+          </g>
+          <g className="b360-mini-orbs">
+            <circle className="b360-mini-orb-a" cx="8" cy="8" r="2" fill="#FDE68A" />
+            <circle className="b360-mini-orb-b" cx="18" cy="3" r="2" fill="#67E8F9" />
+            <circle className="b360-mini-orb-c" cx="28" cy="8" r="2" fill="#F0ABFC" />
+          </g>
+          <path d="M16 2C12 -1 9 3 12 6L18 11L24 6C27 3 24 -1 20 2L18 4Z" className="b360-mini-heart" fill="#FB7185" />
+          <ellipse cx="18" cy="48" rx="9" ry="2" fill={color} opacity=".45" />
+          <path d="M13 42L12 47M23 42L24 47" stroke={color} strokeWidth="2" strokeLinecap="round" className="b360-mini-thruster" />
+          <path className="b360-mini-left-leg" d="M13 35L12 43H16L18 36" fill="#172554" stroke="#BFDBFE" strokeWidth="1" strokeLinejoin="round" />
+          <path className="b360-mini-right-leg" d="M23 35L24 43H20L18 36" fill="#172554" stroke="#BFDBFE" strokeWidth="1" strokeLinejoin="round" />
+          <g className="b360-mini-torso">
+            <path d="M12 22Q18 19 24 22L27 36Q18 39 9 36Z" fill={color} stroke="#E0F2FE" strokeWidth="1" />
+            <path d="M16 25L18 31L20 25" fill="none" stroke="#FFFFFF" strokeWidth="1" opacity=".75" />
+          </g>
+          <g className="b360-mini-arm-left">
+            <path d="M12 24L6 30L9 32L14 28" fill="none" stroke="#F8FAFC" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+            <circle cx="6" cy="30" r="2" fill="#FDE68A" />
+          </g>
+          <g className="b360-mini-arm-right">
+            <path d="M24 24L30 29L27 32L22 28" fill="none" stroke="#F8FAFC" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+            <circle cx="30" cy="29" r="2" fill="#FDE68A" />
+          </g>
+          <g className="b360-mini-head">
+            <rect x="10" y="7" width="16" height="15" rx="5" fill="#0B1220" stroke={color} strokeWidth="1.4" />
+            <path d="M12 13Q18 8 24 13V17H12Z" fill="#172554" stroke="#BFDBFE" strokeWidth=".6" />
+            <g className="b360-mini-eye-left"><circle cx="15" cy="14" r="1.4" fill="#67E8F9" /></g>
+            <g className="b360-mini-eye-right"><circle cx="21" cy="14" r="1.4" fill="#67E8F9" /></g>
+            <path d="M16 19H20" stroke="#F8FAFC" strokeWidth=".8" strokeLinecap="round" />
+            {headgear}
+            <g className="b360-mini-soundmarks" fill="none" stroke="#FFFFFF" strokeWidth="1.2" strokeLinecap="round">
+              <path d="M28 11Q31 14 28 17" />
+              <path d="M31 9Q35 14 31 19" />
+            </g>
+          </g>
         </g>
-        <g className="b360-mini-arm-right">
-          <path d="M24 24L30 29L27 32L22 28" fill="none" stroke="#F8FAFC" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-          <circle cx="30" cy="29" r="2" fill="#FDE68A" />
-        </g>
-        <circle cx="18" cy="14" r="7" fill="#FDE2C5" stroke="#FFF7ED" strokeWidth=".8" />
-        {headgear}
-        <circle cx="15.5" cy="14" r=".8" fill="#172554" />
-        <circle cx="20.5" cy="14" r=".8" fill="#172554" />
-        <path d="M16 17Q18 18.5 20 17" fill="none" stroke="#9A5B45" strokeWidth=".8" strokeLinecap="round" />
-        <path d="M16 25L18 31L20 25" fill="none" stroke="#FFFFFF" strokeWidth="1" opacity=".75" />
       </svg>
       <span style={{
         position: 'absolute',
@@ -311,60 +479,71 @@ const AdvisorySwarm: React.FC<{ stages: AgentRun['stages'] }> = ({ stages }) => 
   const workingStages = new Set(stages.filter(stage => stage.status === 'active' || stage.status === 'done').map(stage => stage.id));
   const availableRoles = ADVISORY_ROLES.filter(role => stages.some(stage => stage.id === role.stageId));
   if (!availableRoles.length) return null;
+  const activeRole = ADVISORY_ROLES.find(role =>
+    stages.some(stage => stage.id === role.stageId && stage.status === 'active'),
+  );
+  const visibleRoles = activeRole ? [activeRole] : availableRoles;
+  const idleSlots = [
+    { left: '0px', top: '40px' },
+    { left: '130px', top: '40px' },
+    { left: '7px', top: '137px' },
+    { left: '45px', top: '137px' },
+    { left: '83px', top: '137px' },
+    { left: '121px', top: '137px' },
+  ];
 
   return (
     <div aria-label="Advisory agents collaborating around the mascot" style={{
-      position: 'absolute', inset: 0, overflow: 'hidden', pointerEvents: 'none', zIndex: 6,
+      position: 'absolute', inset: 0, overflow: 'visible', pointerEvents: 'none', zIndex: 6,
     }}>
-      {availableRoles.map((role, index) => {
+      {visibleRoles.map((role, index) => {
         const Icon = role.icon;
-        const isWorking = stages.some(stage => stage.id === role.stageId && stage.status === 'active');
+        const isWorking = role.stageId === activeRole?.stageId;
         const isComplete = workingStages.has(role.stageId) && !isWorking;
+        const slot = activeRole
+          ? { left: 'calc(50% + 43px)', top: '50%' }
+          : idleSlots[index];
         return (
           <div
             key={role.stageId}
+            aria-label={`${role.name}, ${role.role}${isWorking ? ', working' : ', standing by'}`}
             title={`${role.name} · ${role.role}${isWorking ? ' · working' : ' · waiting'}`}
             style={{
               position: 'absolute',
-              left: '50%',
-              top: '50%',
+              ...slot,
               width: '42px',
               height: '54px',
-              marginLeft: '-21px',
-              marginTop: '-27px',
               display: 'grid',
               placeItems: 'center',
-              opacity: isWorking ? 1 : isComplete ? .82 : .56,
-              animation: `b360-agent-orbit ${isWorking ? '8s' : '14s'} linear infinite${isWorking ? `, b360-agent-glow 1s ease-in-out infinite` : ''}`,
-              animationDelay: `${-index * 1.2}s`,
+              opacity: isWorking ? 1 : isComplete ? .82 : .72,
+              transform: activeRole ? 'translateY(-50%) scale(.82)' : 'scale(.66)',
+              transformOrigin: activeRole ? 'left center' : 'top left',
+              animation: isWorking ? 'b360-agent-glow 1s ease-in-out infinite' : undefined,
               ['--agent-color' as string]: `${role.color}99`,
-              ['--agent-angle' as string]: `${index * 60}deg`,
             }}
           >
-            <div style={{
+            <MiniAdvisoryMascot
+              color={role.color}
+              icon={<Icon size={9} strokeWidth={2.5} />}
+              role={role.stageId}
+              isWorking={isWorking}
+              className={!activeRole && index < 2 ? `b360-mini-hover-${index === 0 ? 'left' : 'right'}` : undefined}
+            />
+            {!activeRole && <span style={{
               position: 'absolute',
-              inset: 0,
-              animation: `b360-agent-upright ${isWorking ? '8s' : '14s'} linear infinite`,
-              animationDelay: `${-index * 1.2}s`,
-              ['--agent-counter-angle' as string]: `${-index * 60}deg`,
-            }}>
-              <MiniAdvisoryMascot
-                color={role.color}
-                icon={<Icon size={9} strokeWidth={2.5} />}
-                role={role.stageId}
-              />
-              <span style={{
-              position: 'absolute',
-              top: '46px',
+              top: '-8px',
               left: '50%',
               transform: 'translateX(-50%)',
               color: '#FFFFFF',
-              fontSize: '8px',
+              fontSize: '6px',
               fontWeight: 800,
               textShadow: '0 1px 4px #020617',
               whiteSpace: 'nowrap',
-              }}>{role.name}</span>
-            </div>
+              padding: '1px 3px',
+              borderRadius: '4px',
+              background: 'rgba(2,6,23,.72)',
+              border: `1px solid ${role.color}88`,
+            }}>{role.name}</span>}
           </div>
         );
       })}
@@ -372,16 +551,49 @@ const AdvisorySwarm: React.FC<{ stages: AgentRun['stages'] }> = ({ stages }) => 
   );
 };
 
-const WorkConsole: React.FC<{ runs: AgentRun[]; onDismiss: (id: string) => void }> = ({ runs, onDismiss }) => {
+interface ChatPanelPlacement {
+  right: number;
+  width: number;
+  bottom: number;
+  maxHeight: number;
+  viewportWidth: number;
+  viewportHeight: number;
+}
+
+const WorkConsole: React.FC<{
+  runs: AgentRun[];
+  onDismiss: (id: string) => void;
+  dockPosition: { right: number; bottom: number };
+  chatPanel: ChatPanelPlacement | null;
+}> = ({ runs, onDismiss, dockPosition, chatPanel }) => {
   if (runs.length === 0) return null;
   const isRunning = runs.some(run => run.status === 'running');
   const hasErrors = runs.some(run => run.status === 'error');
   const HeadingIcon = isRunning ? Loader : hasErrors ? AlertTriangle : CheckCircle;
   const heading = isRunning ? 'Work Console' : hasErrors ? 'Needs attention' : 'Task updates';
+  const panelLeft = chatPanel
+    ? chatPanel.viewportWidth - chatPanel.right - chatPanel.width
+    : 0;
+  const canFitBesidePanel = Boolean(chatPanel && panelLeft >= 266);
+  const placeAbovePanel = Boolean(chatPanel && !canFitBesidePanel);
+  const consoleBottom = placeAbovePanel && chatPanel
+      ? chatPanel.bottom + chatPanel.maxHeight + 8
+      : dockPosition.bottom + 104;
+  const consoleHeight = placeAbovePanel && chatPanel
+    ? Math.max(80, Math.min(320, chatPanel.viewportHeight - chatPanel.bottom - chatPanel.maxHeight - 16))
+    : chatPanel
+    ? Math.min(320, chatPanel.viewportHeight - 24)
+    : 320;
+  const consoleRight = chatPanel
+    ? canFitBesidePanel
+        ? chatPanel.right + chatPanel.width + 12
+        : chatPanel.right
+      : dockPosition.right + 145;
   return (
     <div style={{
-      position: 'absolute', right: '145px', bottom: '10px', width: '250px',
-      maxHeight: '320px', overflowY: 'auto',
+        position: 'fixed', right: `${consoleRight}px`, bottom: `${consoleBottom}px`,
+      width: `min(250px, calc(100vw - 24px))`,
+      maxHeight: `${consoleHeight}px`, overflowY: 'auto',
       background: 'linear-gradient(135deg, rgba(8,15,30,.94) 0%, rgba(15,30,55,.90) 100%)',
       border: '1px solid rgba(0,245,212,.35)',
       borderRadius: '16px', padding: '12px 14px',
@@ -389,7 +601,7 @@ const WorkConsole: React.FC<{ runs: AgentRun[]; onDismiss: (id: string) => void 
       animation: 'console-in-left .4s ease-out forwards, work-pulse 3s ease-in-out infinite',
       backdropFilter: 'blur(14px)',
       pointerEvents: 'auto',
-      zIndex: 10,
+      zIndex: 9997,
     }}>
       <div style={{ fontSize: '.68rem', fontWeight: 800, color: hasErrors ? '#FCA5A5' : '#00F5D4', textTransform: 'uppercase', letterSpacing: '.1em', marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '6px' }}>
         <HeadingIcon size={12} style={isRunning ? { animation: 'spin 1.5s linear infinite' } : undefined} /> {heading}
@@ -431,7 +643,6 @@ const WorkConsole: React.FC<{ runs: AgentRun[]; onDismiss: (id: string) => void 
           )}
         </div>
       ))}
-      <style>{`${MINI_MASCOT_CSS}@keyframes spin{to{transform:rotate(360deg)}}`}</style>
     </div>
   );
 };
@@ -452,11 +663,12 @@ const HologramCage: React.FC<{
   const isDocked = mode === 'docked';
   const lastFlightRef = useRef({ x: '0px', y: '0px', angle: '0deg' });
   const flight = guideTarget
-    ? {
-        x: `${guideTarget.x + guideTarget.width / 2 - (window.innerWidth - position.right - 80)}px`,
-        y: `${guideTarget.y + guideTarget.height / 2 - (window.innerHeight - position.bottom - 94 - 119)}px`,
-        angle: guideTarget.x + guideTarget.width / 2 < window.innerWidth - position.right - 80 ? '-12deg' : '12deg',
-      }
+    ? (() => {
+        const x = guideTarget.x + guideTarget.width / 2 - (window.innerWidth - position.right - 80);
+        const y = guideTarget.y + guideTarget.height / 2 - (window.innerHeight - position.bottom - 94 - 119);
+        const heading = Math.atan2(y, x) * 180 / Math.PI + 90;
+        return { x: `${x}px`, y: `${y}px`, angle: `${heading}deg` };
+      })()
     : lastFlightRef.current;
 
   useEffect(() => {
@@ -490,7 +702,7 @@ const HologramCage: React.FC<{
         <div style={{ position: 'absolute', bottom: '2px', right: '14px', width: '4px', height: '4px', borderRadius: '50%', background: '#FFFFFF', boxShadow: `0 0 8px ${h.primary}`, animation: 'holo-particle-rise 2.8s ease-in infinite 1.4s' }} />
       </div>
 
-      {portal === 'admin' && mode === 'active' && <AdvisorySwarm stages={companions} />}
+      {portal === 'admin' && mode !== 'moving' && <AdvisorySwarm stages={companions} />}
 
       <div style={{
         position: 'absolute', left: '0', bottom: '49px',
@@ -625,7 +837,7 @@ const SpeechBubble: React.FC<{
       </div>
 
       {/* Action buttons */}
-      {actions && actions.length > 0 && doneTyping && (
+      {actions && actions.length > 0 && (
         <div style={{ marginTop: '6px', display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
           {actions.map((a, i) => (
             <button key={i} onClick={a.onClick} style={{
@@ -660,9 +872,13 @@ const SpeechBubble: React.FC<{
 /* ══════════════════════════════════════════════════════════════
    FloatingMascot — the main export (Bottom-Right position)
    ══════════════════════════════════════════════════════════════ */
-export const FloatingMascot: React.FC<{ position: { right: number; bottom: number } }> = ({ position }) => {
+export const FloatingMascot: React.FC<{
+  position: { right: number; bottom: number };
+  chatPanelPlacement: ChatPanelPlacement;
+}> = ({ position, chatPanelPlacement }) => {
   const {
     portal,
+    isOpen,
     proactiveMessage, proactiveAction,
     setProactiveMessage, setProactiveAction,
     mascotAnimation, mascotAnimationKey, isThinking,
@@ -670,48 +886,56 @@ export const FloatingMascot: React.FC<{ position: { right: number; bottom: numbe
     mascotMode, setMascotMode,
     agentRuns, removeAgentRun,
     guideTarget, setGuideTarget,
+    reportActivity,
   } = useAssistant();
 
   const [displayText, setDisplayText] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [idleAnimation, setIdleAnimation] = useState<MascotAnimation>('idle');
+  const lastIdleGestureRef = useRef<MascotAnimation>('idle');
   const dockScale = mascotMode === 'docked' ? 0.82 : 1.06;
 
   // Effective animation cue
   const effectiveAnimation = isThinking ? 'think'
+    : agentRuns.some(run => run.status === 'running') ? 'work'
     : isTyping ? 'talk'
-    : (agentRuns.some(r => r.status === 'running') ? 'work' : mascotAnimation);
-  const displayedAnimation = mascotMode === 'docked' && effectiveAnimation === 'idle'
+    : mascotAnimation;
+  const hasPriorityAnimation = isThinking || isTyping || agentRuns.some(run => run.status === 'running');
+  const displayedAnimation = hasPriorityAnimation
+    ? effectiveAnimation
+    : mascotMode !== 'moving' && idleAnimation !== 'idle'
     ? idleAnimation
     : effectiveAnimation;
 
   useEffect(() => {
     if (
-      !assistantEnabled || mascotMode !== 'docked' || proactiveMessage ||
-      isThinking || agentRuns.some(run => run.status === 'running')
+      !assistantEnabled || mascotMode === 'moving' || isThinking || isTyping ||
+      agentRuns.some(run => run.status === 'running')
     ) {
       setIdleAnimation('idle');
       return undefined;
     }
 
-    const idleGestures = ADVISORY_GESTURES;
+    const idleGestures = MASCOT_IDLE_GESTURES;
     let gestureTimer: ReturnType<typeof setTimeout>;
     let resetTimer: ReturnType<typeof setTimeout>;
     const playRandomGesture = () => {
-      const gesture = idleGestures[Math.floor(Math.random() * idleGestures.length)];
+      const choices = idleGestures.filter(gesture => gesture !== lastIdleGestureRef.current);
+      const gesture = choices[Math.floor(Math.random() * choices.length)];
+      lastIdleGestureRef.current = gesture;
       setIdleAnimation(gesture);
       resetTimer = setTimeout(() => {
         setIdleAnimation('idle');
-        gestureTimer = setTimeout(playRandomGesture, 16_000 + Math.random() * 8_000);
-      }, 2_800);
+        gestureTimer = setTimeout(playRandomGesture, 5_000 + Math.random() * 4_000);
+      }, 3_100);
     };
-    gestureTimer = setTimeout(playRandomGesture, 14_000 + Math.random() * 6_000);
+    gestureTimer = setTimeout(playRandomGesture, 5_000 + Math.random() * 4_000);
 
     return () => {
       clearTimeout(gestureTimer);
       clearTimeout(resetTimer);
     };
-  }, [assistantEnabled, mascotMode, proactiveMessage, isThinking, agentRuns]);
+  }, [assistantEnabled, mascotMode, isThinking, isTyping, agentRuns]);
 
   // Auto dock/undock based on activity
   useEffect(() => {
@@ -739,16 +963,24 @@ export const FloatingMascot: React.FC<{ position: { right: number; bottom: numbe
         setIsTyping(false);
         clearInterval(timer);
       }
-    }, 35);
+    }, 20);
     return () => clearInterval(timer);
   }, [proactiveMessage]);
 
   const activeRuns = useMemo(() => agentRuns.filter(r => r.status !== 'idle'), [agentRuns]);
   const activeRun = activeRuns.find(run => run.status === 'running');
+  const showSpeechBubble = Boolean(proactiveMessage) && !activeRun;
+  const isGuiding = Boolean(guideTarget) && mascotMode === 'moving';
+  const idleAdvisoryStages: AgentRun['stages'] = ADVISORY_ROLES.map(role => ({
+    id: role.stageId,
+    label: role.role,
+    status: 'pending',
+  }));
 
   const handleDismissBubble = () => {
     setProactiveMessage(null);
     setProactiveAction(null);
+    reportActivity('action', 'Dismissed proactive assistant suggestion');
   };
 
   if (!assistantEnabled) return null;
@@ -780,8 +1012,8 @@ export const FloatingMascot: React.FC<{ position: { right: number; bottom: numbe
       zIndex: 9997,
       pointerEvents: 'none',
     }}>
-      {/* Proactive speech bubble */}
-      {proactiveMessage && (
+      {/* During an accepted guide action, let the single mascot fly to the target. */}
+      {!isOpen && !isGuiding && showSpeechBubble && proactiveMessage && (
         <SpeechBubble
           portal={portal}
           displayText={displayText}
@@ -795,27 +1027,32 @@ export const FloatingMascot: React.FC<{ position: { right: number; bottom: numbe
       )}
 
       {/* Show the compact character on the bubble while it replaces the hologram. */}
-      {!proactiveMessage && (
+      {(!isOpen || isGuiding) && (!showSpeechBubble || isGuiding) && (
         <HologramCage
           portal={portal}
           mode={mascotMode}
           position={position}
           guideTarget={guideTarget}
           onReturnEnd={() => { setMascotMode('docked'); setGuideTarget(null); }}
-          companions={activeRun?.stages || []}
+          companions={activeRun?.stages || idleAdvisoryStages}
         >
           {portal === 'customer'
             ? <CustomerMascotSVG animation={displayedAnimation} animationKey={mascotAnimationKey} />
             : <AdminMascotSVG animation={displayedAnimation} animationKey={mascotAnimationKey} />}
         </HologramCage>
       )}
-      {proactiveMessage && <div aria-hidden="true" style={{ width: '160px', height: '212px' }} />}
+      {!isOpen && showSpeechBubble && <div aria-hidden="true" style={{ width: '160px', height: '212px' }} />}
 
-      {/* Work Console — shown to the left of the mascot for admin tasks */}
-      {portal === 'admin' && <WorkConsole runs={activeRuns} onDismiss={removeAgentRun} />}
-
-      <style>{HOLO_CSS}</style>
+      <style>{`${HOLO_CSS}${MINI_MASCOT_CSS}@keyframes spin{to{transform:rotate(360deg)}}`}</style>
     </div>
+    {portal === 'admin' && (
+      <WorkConsole
+        runs={activeRuns}
+        onDismiss={removeAgentRun}
+        dockPosition={position}
+        chatPanel={isOpen ? chatPanelPlacement : null}
+      />
+    )}
     </>
   );
 };

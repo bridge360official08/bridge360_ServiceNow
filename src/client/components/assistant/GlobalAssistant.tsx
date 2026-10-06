@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { FloatingMascot } from './FloatingMascot';
 import { AssistantChatPanel } from './AssistantChatPanel';
 import { useAssistant, type AssistantGuideTarget } from '../../store/AssistantContext';
+import { useBridge360 } from '../../store/Bridge360Context';
 
 interface DockPosition {
   right: number;
@@ -46,6 +47,7 @@ const readDockPosition = (): DockPosition => {
 };
 
 export const GlobalAssistant: React.FC = () => {
+  const { setAdminView, partnerAgencies, referrals } = useBridge360();
   const {
     setPortal, portal, screenContext, setScreenContext, setProactiveMessage, proactiveMessage,
     isOpen, setIsOpen, playAnimation, pendingApproval,
@@ -91,6 +93,10 @@ export const GlobalAssistant: React.FC = () => {
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, [clampPosition, saveDockPosition]);
+
+  useEffect(() => {
+    if (lastActivity) lastActivityAtRef.current = lastActivity.at;
+  }, [lastActivity]);
 
   const handleLauncherPointerDown = (event: React.PointerEvent<HTMLButtonElement>) => {
     if (event.button !== 0) return;
@@ -146,11 +152,13 @@ export const GlobalAssistant: React.FC = () => {
       clearTimeout(launcherTapTimerRef.current);
       launcherTapTimerRef.current = null;
       setAssistantEnabled(!assistantEnabled);
+      reportActivity('action', assistantEnabled ? 'Hid the assistant hologram' : 'Showed the assistant hologram');
       return;
     }
     launcherTapTimerRef.current = window.setTimeout(() => {
       launcherTapTimerRef.current = null;
       setIsOpen(!isOpen);
+      reportActivity('action', isOpen ? 'Closed the assistant panel' : 'Opened the assistant panel');
     }, 300);
   };
 
@@ -198,19 +206,25 @@ export const GlobalAssistant: React.FC = () => {
   }, [labelElement]);
 
   const updateGuideTargetPosition = useCallback(() => {
-    const element = guideTargetElementRef.current;
+    let element = guideTargetElementRef.current;
     if (!element?.isConnected) {
-      guideTargetElementRef.current = null;
-      setGuideTarget(null);
-      return;
+      const candidates = Array.from(document.querySelectorAll(
+        'button, a, input, select, textarea, label, [role="button"], [tabindex]',
+      ));
+      const replacement = candidates
+        .map(candidate => inspectElement(candidate))
+        .find(candidate => candidate?.guide.label === guideTarget?.label);
+      if (!replacement) return;
+      element = replacement.element;
+      guideTargetElementRef.current = element;
     }
     const rect = element.getBoundingClientRect();
-    if (rect.width <= 0 || rect.height <= 0) {
-      guideTargetElementRef.current = null;
-      setGuideTarget(null);
-      return;
-    }
+    if (rect.width <= 0 || rect.height <= 0) return;
     if (!guideTarget) return;
+    if (
+      guideTarget.x === rect.x && guideTarget.y === rect.y &&
+      guideTarget.width === rect.width && guideTarget.height === rect.height
+    ) return;
     setGuideTarget({
       ...guideTarget,
       x: rect.x,
@@ -218,7 +232,7 @@ export const GlobalAssistant: React.FC = () => {
       width: rect.width,
       height: rect.height,
     });
-  }, [guideTarget, setGuideTarget]);
+  }, [guideTarget, inspectElement, setGuideTarget]);
 
   const startGuidance = useCallback((target: ObservedElement | null, prompt: string) => {
     setProactiveMessage(null);
@@ -241,9 +255,17 @@ export const GlobalAssistant: React.FC = () => {
   useEffect(() => {
     if (!guideTarget || mascotMode !== 'moving') return undefined;
     const update = () => updateGuideTargetPosition();
+    let frame = 0;
+    const observer = new MutationObserver(() => {
+      if (frame) cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(update);
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
     window.addEventListener('resize', update);
     window.addEventListener('scroll', update, true);
     return () => {
+      observer.disconnect();
+      if (frame) cancelAnimationFrame(frame);
       window.removeEventListener('resize', update);
       window.removeEventListener('scroll', update, true);
     };
@@ -266,7 +288,10 @@ export const GlobalAssistant: React.FC = () => {
     };
     const handlePointerOver = (event: PointerEvent) => {
       const observed = inspectElement(event.target);
-      if (!observed || observedElementRef.current?.guide.label === observed.guide.label) return;
+      if (
+        !observed ||
+        (observedElementRef.current?.element === observed.element && hoverTimerRef.current !== null)
+      ) return;
       observedElementRef.current = observed;
       if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
       hoverTimerRef.current = setTimeout(() => {
@@ -280,17 +305,64 @@ export const GlobalAssistant: React.FC = () => {
               primary: true,
               onClick: () => startGuidance(observed, `Explain “${observed.guide.label}” in simple steps and help me complete it.`),
             },
-            { label: 'Not now', onClick: () => { setProactiveMessage(null); setProactiveAction(null); } },
+            { label: 'Not now', onClick: () => {
+              lastActivityAtRef.current = Date.now();
+              setProactiveMessage(null);
+              setProactiveAction(null);
+            } },
+          ]);
+          playAnimation('point');
+        } else if (portal === 'admin' && !isOpen && !proactiveAction && !proactiveMessage) {
+          const label = observed.guide.label;
+          setProactiveMessage(/referral|partner agency/i.test(label)
+            ? 'I can review the listed partner capacity for this referral queue. I will not contact or book a partner.'
+            : `Would a quick read-only review of “${label}” help?`);
+          setProactiveAction([
+            {
+              label: /referral|partner agency/i.test(label) ? 'Open referrals' : 'Review this',
+              primary: true,
+              onClick: () => {
+                if (/referral|partner agency/i.test(label)) {
+                  setProactiveMessage(null);
+                  setProactiveAction(null);
+                  setAdminView('referrals');
+                } else {
+                  startGuidance(observed, `Give a concise, read-only explanation of “${label}” and identify a safe next step. Do not change records.`);
+                }
+              },
+            },
+            { label: 'No thanks', onClick: () => {
+              lastActivityAtRef.current = Date.now();
+              setProactiveMessage(null);
+              setProactiveAction(null);
+            } },
           ]);
           playAnimation('point');
         }
       }, 1400);
     };
     const handleAction = (event: Event) => {
+      if (
+        event.target instanceof Element &&
+        event.target.closest('.b360-assistant-doubtbox, .b360-assistant-motion, [data-b360-assistant]')
+      ) return;
       const observed = inspectElement(event.target);
       if (observed) observedElementRef.current = observed;
       noteActivity('action', observed ? `Used ${observed.guide.label}` : 'Interacted with the page');
       if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
+      const guidedElement = guideTargetElementRef.current;
+      if (guidedElement?.isConnected && observed && observed.element !== guidedElement) {
+        guideTargetElementRef.current = observed.element;
+        setGuideTarget(observed.guide);
+        setMascotMode('moving');
+        playAnimation('point');
+        if (guideReturnTimerRef.current) clearTimeout(guideReturnTimerRef.current);
+        guideReturnTimerRef.current = setTimeout(() => {
+          guideTargetElementRef.current = null;
+          setGuideTarget(null);
+        }, 4500);
+        reportActivity('input', `Guidance redirected to ${observed.guide.label}`);
+      }
     };
     const handleFocus = (event: FocusEvent) => {
       const observed = inspectElement(event.target);
@@ -312,7 +384,7 @@ export const GlobalAssistant: React.FC = () => {
     document.addEventListener('pointerover', handlePointerOver, { passive: true });
     document.addEventListener('pointerdown', handleAction, true);
     document.addEventListener('change', handleAction, true);
-    document.addEventListener('input', handleAction, true);
+    document.addEventListener('input', handleAction);
     document.addEventListener('focusin', handleFocus, true);
     document.addEventListener('pointerout', clearHover, true);
     return () => {
@@ -320,22 +392,53 @@ export const GlobalAssistant: React.FC = () => {
       document.removeEventListener('pointerover', handlePointerOver);
       document.removeEventListener('pointerdown', handleAction, true);
       document.removeEventListener('change', handleAction, true);
-      document.removeEventListener('input', handleAction, true);
+      document.removeEventListener('input', handleAction);
       document.removeEventListener('focusin', handleFocus, true);
       document.removeEventListener('pointerout', clearHover, true);
       clearHover();
     };
-  }, [inspectElement, isOpen, playAnimation, portal, proactiveAction, reportActivity, setProactiveAction, setProactiveMessage, startGuidance]);
+  }, [inspectElement, isOpen, playAnimation, portal, proactiveAction, proactiveMessage, reportActivity, setAdminView, setGuideTarget, setMascotMode, setProactiveAction, setProactiveMessage, startGuidance]);
 
   // Offer a contextual task after a quiet period; the assistant does not send
   // observed page content to an AI service until the user chooses an action.
   useEffect(() => {
     if (isOpen || proactiveAction || proactiveMessage) return undefined;
     const idleFor = Date.now() - lastActivityAtRef.current;
-    const wait = Math.max(0, 28_000 - idleFor);
+    const wait = Math.max(0, 18_000 - idleFor);
     const timer = setTimeout(() => {
+      const focused = document.activeElement;
+      if (focused instanceof HTMLInputElement || focused instanceof HTMLTextAreaElement || focused instanceof HTMLSelectElement) return;
       const target = observedElementRef.current;
       if (portal === 'admin') {
+        if (/referral|partner_agenc/i.test(`${screenContext} ${target?.guide.label || ''}`)) {
+          const listedSlots = partnerAgencies
+            .filter(agency => agency.status === 'Active' && agency.availableCapacity > 0)
+            .reduce((total, agency) => total + agency.availableCapacity, 0);
+          const openReferralCount = referrals.filter(referral =>
+            referral.status === 'Pending' || referral.status === 'In Progress',
+          ).length;
+          setProactiveMessage(
+            `${openReferralCount} open referral(s); ${listedSlots} slots are listed in Bridge360 data. These are not live partner confirmations.`,
+          );
+          setProactiveAction([
+            {
+              label: 'Open referrals',
+              primary: true,
+              onClick: () => {
+                setProactiveMessage(null);
+                setProactiveAction(null);
+                setAdminView('referrals');
+              },
+            },
+            { label: 'No thanks', onClick: () => {
+              lastActivityAtRef.current = Date.now();
+              setProactiveMessage(null);
+              setProactiveAction(null);
+            } },
+          ]);
+          playAnimation('point');
+          return;
+        }
         const hasCaseTarget = Boolean(target && /case|family|application|verification/i.test(`${screenContext} ${target.guide.label}`));
         const label = target?.guide.label || 'this page';
         setProactiveMessage(hasCaseTarget
@@ -355,14 +458,19 @@ export const GlobalAssistant: React.FC = () => {
         ]);
       } else {
         const label = target?.guide.label;
-        setProactiveMessage(label
+        const casePage = /case|family|application|verification/i.test(`${screenContext} ${label || ''}`);
+        setProactiveMessage(casePage
+          ? 'Would you like a simple summary of your case progress?'
+          : label
           ? `Would you like help with “${label}”? I can explain it one small step at a time.`
           : 'Would you like me to explain what you can do on this page, one small step at a time?');
         setProactiveAction([
           {
-            label: 'Guide me',
+            label: casePage ? 'Yes, summarize it' : 'Guide me',
             primary: true,
-            onClick: () => startGuidance(target, label
+            onClick: () => startGuidance(target, casePage
+              ? `Summarize my current case progress in simple language and explain one safe next step. Do not change any case data.`
+              : label
               ? `Explain “${label}” in simple language and guide me through the next safe step.`
               : `Explain the ${screenContext.replace(/[_-]/g, ' ')} page in simple language and guide me through one safe next step.`),
           },
@@ -373,26 +481,53 @@ export const GlobalAssistant: React.FC = () => {
               if (destination.origin === window.location.origin) window.location.assign(destination.href);
             },
           }] : []),
-          { label: 'Not now', onClick: () => { setProactiveMessage(null); setProactiveAction(null); } },
+          { label: 'Not now', onClick: () => {
+            lastActivityAtRef.current = Date.now();
+            setProactiveMessage(null);
+            setProactiveAction(null);
+          } },
         ]);
       }
       playAnimation('wave');
     }, wait);
     return () => clearTimeout(timer);
-  }, [isOpen, lastActivity, portal, proactiveAction, proactiveMessage, screenContext, setProactiveAction, setProactiveMessage, playAnimation, startGuidance]);
+  }, [isOpen, lastActivity, portal, proactiveAction, proactiveMessage, screenContext, partnerAgencies, referrals, setAdminView, setProactiveAction, setProactiveMessage, playAnimation, startGuidance]);
 
   const isCustomer = portal === 'customer';
   const fabColor = isCustomer ? '#8B5CF6' : '#38BDF8';
   const dockScale = mascotMode === 'docked' ? 0.82 : 1.06;
+  const layoutWidth = document.documentElement.clientWidth;
+  const layoutHeight = document.documentElement.clientHeight;
+  const chatWidth = Math.min(320, layoutWidth - 24);
+  const launcherCenter = layoutWidth - dockPosition.right - DOCK_WIDTH / 2;
+  const chatRight = Math.min(
+    Math.max(12, layoutWidth - launcherCenter - chatWidth / 2),
+    Math.max(12, layoutWidth - chatWidth - 12),
+  );
+  const chatBottom = Math.min(dockPosition.bottom + 96, Math.max(12, layoutHeight - 120));
+  const chatMaxHeight = Math.max(180, Math.min(390, layoutHeight - chatBottom - 12));
+  const controlRight = isOpen
+    ? chatRight + chatWidth / 2 - DOCK_WIDTH / 2
+    : dockPosition.right;
 
   return (
     <>
-      <FloatingMascot position={dockPosition} />
+      <FloatingMascot
+        position={dockPosition}
+        chatPanelPlacement={{
+          right: chatRight,
+          width: chatWidth,
+          bottom: chatBottom,
+          maxHeight: chatMaxHeight,
+          viewportWidth: layoutWidth,
+          viewportHeight: layoutHeight,
+        }}
+      />
       <AssistantChatPanel position={dockPosition} />
 
       {/* Chat control sits below the projector and is visually linked to its emitter. */}
       <div style={{
-        position: 'fixed', bottom: `${dockPosition.bottom}px`, right: `${dockPosition.right}px`,
+        position: 'fixed', bottom: `${dockPosition.bottom}px`, right: `${controlRight}px`,
         width: `${DOCK_WIDTH}px`, height: '84px',
         zIndex: 9999,
         display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px',

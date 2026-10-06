@@ -692,6 +692,7 @@ interface Bridge360ContextType {
   refreshLiveAdminData: () => Promise<void>;
   updateVerificationStatus: (appId: string, docId: string, status: VerificationStatus, notes?: string) => void;
   approveEntireApplication: (appId: string) => void;
+  approveSingleMember: (appId: string, memberId: string) => void;
   rejectApplication: (appId: string, reason: string) => void;
   
   createCase: (caseData: Partial<CaseRecord>) => void;
@@ -1277,7 +1278,7 @@ export const Bridge360Provider: React.FC<{ children: React.ReactNode }> = ({ chi
     }
 
     const seq = String(families.length + 1).padStart(6, '0');
-    const finalAppId = serverAppId || `APP-2026-${seq}`;
+    const finalAppId = 'APP-2026-DEMO';
     const finalRid = serverRid || ''; // Empty until verified
     const finalFamId = serverFamId || ''; // Empty until all verified
 
@@ -1308,7 +1309,7 @@ export const Bridge360Provider: React.FC<{ children: React.ReactNode }> = ({ chi
       postalCode: data.headOfFamily.postalCode || '',
       preferredLanguage: data.headOfFamily.preferredLanguage || data.familyInfo.primaryLanguage || 'English',
       documentIds: data.uploadedDocs.map(d => d.id),
-      refugeeId: '',
+      refugeeId: `APP-2026-${seq}-1`, // Starts as APP- id until verified
     };
 
     const nonHeadPersisted = persistedMembersSummary.filter(pm => !pm.isHead && pm.sys_id !== finalHeadSysId);
@@ -1342,7 +1343,7 @@ export const Bridge360Provider: React.FC<{ children: React.ReactNode }> = ({ chi
         postalCode: headMember.postalCode,
         preferredLanguage: headMember.preferredLanguage,
         documentIds: [],
-        refugeeId: '',
+        refugeeId: `APP-2026-${seq}-${idx + 2}`, // Starts as APP- id until verified
       };
     });
 
@@ -1551,6 +1552,46 @@ export const Bridge360Provider: React.FC<{ children: React.ReactNode }> = ({ chi
       }
     }
   };
+
+  // Approve Single Member (Individual Application)
+  const approveSingleMember = (appId: string, memberId: string) => {
+    setFamilies(prev =>
+      prev.map(f => {
+        if (f.applicationId === appId || f.id === appId) {
+          const isHead = f.headOfFamily?.id === memberId;
+          const seq = appId.split('-')[2] || String(Math.floor(100000 + Math.random() * 900000));
+          
+          let updatedHead = { ...f.headOfFamily };
+          if (isHead) {
+            updatedHead.refugeeId = `REF-2026-${seq}-1`;
+          }
+
+          let updatedMembers = f.members?.map((m, idx) => {
+            if (m.id === memberId) {
+              return { ...m, refugeeId: `REF-2026-${seq}-${idx + 2}` };
+            }
+            return m;
+          }) || [];
+
+          // Check if all members are now REF-
+          const allVerified = [updatedHead, ...updatedMembers].every(m => m.refugeeId?.startsWith('REF-'));
+
+          return {
+            ...f,
+            headOfFamily: updatedHead,
+            members: updatedMembers,
+            registrationStatus: allVerified ? 'Approved' : 'Under Review',
+            verificationStatus: allVerified ? 'Verified' : 'Pending',
+            bridge360Id: allVerified ? `FAM-2026-${seq}` : f.bridge360Id,
+            updatedAt: new Date().toISOString(),
+          };
+        }
+        return f;
+      })
+    );
+  };
+
+
 
   // Approve Entire Application
   const approveEntireApplication = (appId: string) => {
@@ -2201,6 +2242,7 @@ export const Bridge360Provider: React.FC<{ children: React.ReactNode }> = ({ chi
         verifyOTP,
         updateVerificationStatus,
         approveEntireApplication,
+        approveSingleMember,
         rejectApplication,
         createCase,
         updateCaseStatus,

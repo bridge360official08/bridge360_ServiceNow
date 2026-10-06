@@ -67,6 +67,7 @@ export const VerificationView: React.FC = () => {
     documents,
     updateVerificationStatus,
     approveEntireApplication,
+    approveSingleMember,
     rejectApplication,
     setSelectedFamilyId,
     setAdminView,
@@ -490,6 +491,12 @@ export const VerificationView: React.FC = () => {
     alert(`Application for ${activeFamily.headOfFamily?.firstName} ${activeFamily.headOfFamily?.lastName} has been Approved and Verified! Official ID issued.`);
   };
 
+  const handleApproveMember = (memberId: string) => {
+    if (!activeFamily) return;
+    approveSingleMember(activeFamily.applicationId, memberId);
+    alert(`Individual Application Approved! Refugee ID generated.`);
+  };
+
   const handleConfirmReject = () => {
     if (!activeFamily) return;
     if (activeDoc) {
@@ -792,6 +799,39 @@ export const VerificationView: React.FC = () => {
               </button>
             </div>
           )}
+        </div>
+      </div>
+
+      {/* Individual Applications Section */}
+      <div style={{ background: '#F8FAFC', padding: '16px', borderRadius: '12px', border: '1px solid #E2E8F0', marginBottom: '20px' }}>
+        <h4 style={{ margin: '0 0 12px 0', fontSize: '1rem', color: '#0F172A' }}>Individual Applications (Family Members)</h4>
+        <div style={{ display: 'grid', gap: '10px' }}>
+          {[activeFamily.headOfFamily, ...(activeFamily.members || [])].filter(Boolean).map(m => {
+            const isApproved = m!.refugeeId?.startsWith('REF-');
+            const displayId = m!.refugeeId || 'Pending ID';
+            return (
+              <div key={m!.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#FFFFFF', padding: '12px 16px', borderRadius: '8px', border: '1px solid #E2E8F0', boxShadow: '0 1px 2px rgba(0,0,0,0.02)' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontWeight: 600, color: '#1E293B', fontSize: '0.95rem' }}>{m!.firstName} {m!.lastName}</span>
+                    <span style={{ fontSize: '0.8rem', color: '#64748B', background: '#F1F5F9', padding: '2px 6px', borderRadius: '4px' }}>{m!.relationshipToHead}</span>
+                  </div>
+                  <div style={{ fontSize: '0.85rem', color: isApproved ? '#059669' : '#3B82F6', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <User size={14} /> ID: {displayId} 
+                  </div>
+                </div>
+                <div>
+                  {isApproved ? (
+                    <span className="badge badge-high" style={{ padding: '6px 12px' }}><CheckCircle size={14} /> Approved as Refugee</span>
+                  ) : (
+                    <button onClick={() => handleApproveMember(m!.id)} className="btn-primary" style={{ padding: '6px 12px', fontSize: '0.8rem', background: '#10B981', borderColor: '#10B981' }}>
+                      Approve Single Application
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
 
