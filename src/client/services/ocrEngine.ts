@@ -1143,7 +1143,8 @@ export async function extractDocumentFields(
     // If the document is a Grama Niladhari or family book, we extract the family members!
     familyMembers = [
       {
-        id: 'MOCK-MEM-1',\n        name: 'Anjali Perera',
+        id: 'MOCK-MEM-1',
+        name: 'Anjali Perera',
         relationshipToHead: 'Spouse',
         dateOfBirth: '1982-08-22',
         gender: 'Female',
@@ -1151,7 +1152,8 @@ export async function extractDocumentFields(
         source: 'Mock OCR',
       },
       {
-        id: 'MOCK-MEM-2',\n        name: 'Kavi Perera',
+        id: 'MOCK-MEM-2',
+        name: 'Kavi Perera',
         relationshipToHead: 'Child',
         dateOfBirth: '2010-10-10',
         gender: 'Male',
