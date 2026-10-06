@@ -288,13 +288,11 @@ export const InternPanel: React.FC<InternPanelProps> = ({
             <div key={card.id} style={{ background: '#FFFFFF', borderRadius: '10px', border: '1px solid #E2E8F0', padding: '14px', color: '#0F172A' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
                 <span style={{ fontSize: '0.78rem', fontWeight: 800, color: '#0F172A' }}>{card.title}</span>
-                {card.source && card.source !== 'gemini' && (
+                {card.source && (
                   <span style={{ fontSize: '0.62rem', color: card.source === 'servicenow' ? '#16A34A' : '#94A3B8', display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
                     {card.source === 'servicenow'
                       ? <><ShieldCheck size={10} /> ServiceNow AI</>
-                      : card.source === 'gemini'
-                        ? 'Gemini'
-                        : t('assistant.srcOffline', 'offline mode')}
+                      : t('assistant.srcOffline', 'offline mode')}
                   </span>
                 )}
               </div>

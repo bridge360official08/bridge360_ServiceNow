@@ -25,7 +25,8 @@ import {
   Lock,
   Upload,
   Phone,
-  Mail
+  Mail,
+  ArrowRight
 } from 'lucide-react';
 import { useBridge360 } from '../../store/Bridge360Context';
 import { Bridge360Logo } from '../../components/common/Bridge360Logo';
