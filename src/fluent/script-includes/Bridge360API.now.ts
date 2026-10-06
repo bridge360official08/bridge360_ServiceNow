@@ -146,135 +146,421 @@ Bridge360API.prototype = {
       var famInfo = payload.familyInfo || {};
       var head    = payload.headOfFamily || {};
       var members = payload.members || [];
+      var familyMembers = payload.familyMembers || [];
+      var selectedApplicantId = payload.selectedApplicantMemberId || '';
       var docs    = payload.uploadedDocs || [];
+      var clientFamilySysId = payload.familySysId || '';
+      var clientAppId = payload.applicationId || '';
+      var isRetry = payload.allowRetry || false;
 
-      // ── Duplicate Check (1 Email & 1 Phone per individual/refugee) ──────
-      if (head.email) {
+      function normalizeRelationship(rel, isHead) {
+        if (isHead) return 'self';
+        if (!rel) return 'other';
+        var r = String(rel).toLowerCase().trim();
+        if (r === 'self' || r === 'head') return 'self';
+        if (r === 'spouse' || r === 'wife' || r === 'husband' || r === 'istri' || r === 'suami') return 'spouse';
+        if (r === 'son' || r === 'anak' || r === 'child') return 'son';
+        if (r === 'daughter') return 'daughter';
+        if (r === 'father' || r === 'ayah' || r === 'parent') return 'father';
+        if (r === 'mother' || r === 'ibu') return 'mother';
+        if (r === 'sibling' || r === 'brother' || r === 'sister' || r === 'saudara') return 'sibling';
+        return 'other';
+      }
+
+      function normalizeGender(g) {
+        if (!g) return 'other';
+        var s = String(g).toLowerCase().trim();
+        if (s === 'male' || s === 'm' || s === 'laki-laki' || s === 'pria') return 'male';
+        if (s === 'female' || s === 'f' || s === 'perempuan' || s === 'wanita') return 'female';
+        return 'other';
+      }
+
+      function normalizeDate(d) {
+        if (!d) return '';
+        var str = String(d).trim();
+        var match = str.match(/^(\\d{4})[-/.](\\d{1,2})[-/.](\\d{1,2})$/);
+        if (match) {
+          var m = parseInt(match[2], 10);
+          var day = parseInt(match[3], 10);
+          return match[1] + '-' + (m < 10 ? '0' + m : m) + '-' + (day < 10 ? '0' + day : day);
+        }
+        return str;
+      }
+
+      // ── 1. Family Record Management (Create or Reuse on Retry) ──
+      var grFam = new GlideRecord('u_bridge360_family');
+      var sysFamId = '';
+      var appId = '';
+
+      if (clientFamilySysId) {
+        if (grFam.get(clientFamilySysId)) {
+          sysFamId = grFam.getUniqueValue();
+          appId = grFam.getValue('u_application_id') || clientAppId;
+          isRetry = true;
+        }
+      }
+
+      if (!sysFamId && clientAppId) {
+        grFam.addQuery('u_application_id', clientAppId);
+        grFam.query();
+        if (grFam.next()) {
+          sysFamId = grFam.getUniqueValue();
+          appId = grFam.getValue('u_application_id');
+          isRetry = true;
+        }
+      }
+
+      if (!sysFamId && head.email) {
         var grEmailChk = new GlideRecord('u_bridge360_family');
         grEmailChk.addQuery('u_email', head.email);
         grEmailChk.query();
-        if (grEmailChk.hasNext()) {
-          return {
-            success: false,
-            error: 'duplicate_email',
-            message: 'An application is already registered with this email address (' + head.email + '). Please check your existing application via Track Status.'
-          };
+        if (grEmailChk.next()) {
+          if (isRetry) {
+            sysFamId = grEmailChk.getUniqueValue();
+            appId = grEmailChk.getValue('u_application_id');
+          } else {
+            return {
+              success: false,
+              error: 'duplicate_email',
+              message: 'An application is already registered with this email address (' + head.email + '). Please check your existing application via Track Status.'
+            };
+          }
         }
       }
 
-      if (head.mobileNumber) {
+      if (!sysFamId && head.mobileNumber) {
         var grPhoneChk = new GlideRecord('u_bridge360_member');
         grPhoneChk.addQuery('u_mobile_number', head.mobileNumber);
         grPhoneChk.query();
-        if (grPhoneChk.hasNext()) {
-          return {
-            success: false,
-            error: 'duplicate_phone',
-            message: 'An application is already registered with this mobile number (' + head.mobileNumber + ').'
-          };
+        if (grPhoneChk.next()) {
+          if (isRetry) {
+            sysFamId = grPhoneChk.getValue('u_family');
+            var grF = new GlideRecord('u_bridge360_family');
+            if (grF.get(sysFamId)) {
+              appId = grF.getValue('u_application_id');
+            }
+          } else {
+            return {
+              success: false,
+              error: 'duplicate_phone',
+              message: 'An application is already registered with this mobile number (' + head.mobileNumber + ').'
+            };
+          }
         }
       }
 
-      // Generate sequence number for Application ID
-      var seq = new GlideRecord('u_bridge360_family');
-      seq.query();
-      var count = seq.getRowCount() + 1;
-      var numStr = ("000000" + count).slice(-6);
-
-      var appId  = "APP-2026-" + numStr;
       var familyName = famInfo.familyName || (head.lastName ? (head.lastName + " Family") : "Refugee Family");
+      var totalMembersCount = (familyMembers && familyMembers.length > 0) ? familyMembers.length : (1 + (members ? members.length : 0));
 
-      // ── Family record (Refugee ID & Family ID are EMPTY until admin verifies) ──
-      var grFam = new GlideRecord('u_bridge360_family');
-      grFam.initialize();
-      grFam.setValue('u_application_id',    appId);
-      grFam.setValue('u_bridge360_id',      ''); // Intentionally empty until verification
-      grFam.setValue('u_family_id',         ''); // Intentionally empty until verification
-      grFam.setValue('u_family_name',       familyName);
-      grFam.setValue('u_country_of_origin', famInfo.countryOfOrigin || 'Unknown');
-      grFam.setValue('u_arrival_date',      famInfo.arrivalDate || new GlideDate().getValue());
-      grFam.setValue('u_household_size',    famInfo.householdSize || (1 + members.length));
-      grFam.setValue('u_primary_language',  famInfo.primaryLanguage || 'English');
-      grFam.setValue('u_immigration_status','asylum_applicant');
-      grFam.setValue('u_needs_interpreter', famInfo.needsInterpreter ? true : false);
-      grFam.setValue('u_priority',          'normal');
-      grFam.setValue('u_registration_status', 'submitted');
-      grFam.setValue('u_verification_status', 'pending_review');
-      grFam.setValue('u_case_status',       'new');
-      grFam.setValue('u_assigned_officer',  'Sarah Jenkins');
-      grFam.setValue('u_email',             head.email || '');
-      grFam.setValue('u_allow_customer_edit', false);
-      grFam.setValue('u_doc_request_pending', false);
-      var sysFamId = grFam.insert();
+      if (!sysFamId) {
+        var seq = new GlideRecord('u_bridge360_family');
+        seq.query();
+        var count = seq.getRowCount() + 1;
+        var numStr = ("000000" + count).slice(-6);
+        appId = "APP-2026-" + numStr;
 
-      // ── Head of Family member (Refugee ID empty until verified) ──────────
-      var grHead = new GlideRecord('u_bridge360_member');
-      grHead.initialize();
-      grHead.setValue('u_family',              sysFamId);
-      grHead.setValue('u_refugee_id',          ''); // Minted only on verification
-      grHead.setValue('u_is_head',             true);
-      grHead.setValue('u_relationship_to_head','self');
-      grHead.setValue('u_first_name',          head.firstName  || 'Applicant');
-      grHead.setValue('u_middle_name',         head.middleName || '');
-      grHead.setValue('u_last_name',           head.lastName   || 'Family');
-      grHead.setValue('u_gender',              (head.gender || 'other').toLowerCase());
-      grHead.setValue('u_date_of_birth',       head.dateOfBirth  || '');
-      grHead.setValue('u_nationality',         head.nationality  || famInfo.countryOfOrigin || '');
-      grHead.setValue('u_passport_number',     head.passportNumber || '');
-      grHead.setValue('u_national_id',         head.nationalId   || '');
-      grHead.setValue('u_mobile_number',       head.mobileNumber || '');
-      grHead.setValue('u_email',               head.email        || '');
-      grHead.setValue('u_address',             head.address      || '');
-      grHead.setValue('u_city',                head.city         || '');
-      grHead.setValue('u_state',               head.state        || '');
-      grHead.setValue('u_postal_code',         head.postalCode   || '');
-      grHead.setValue('u_verification_status', 'pending');
-      var headSysId = grHead.insert();
+        grFam.initialize();
+        grFam.setValue('u_application_id',    appId);
+        grFam.setValue('u_bridge360_id',      '');
+        grFam.setValue('u_family_id',         '');
+        grFam.setValue('u_family_name',       familyName);
+        grFam.setValue('u_country_of_origin', famInfo.countryOfOrigin || 'Unknown');
+        grFam.setValue('u_arrival_date',      famInfo.arrivalDate || new GlideDate().getValue());
+        grFam.setValue('u_household_size',    totalMembersCount);
+        grFam.setValue('u_primary_language',  famInfo.primaryLanguage || 'English');
+        grFam.setValue('u_immigration_status','asylum_applicant');
+        grFam.setValue('u_needs_interpreter', famInfo.needsInterpreter ? true : false);
+        grFam.setValue('u_priority',          'normal');
+        grFam.setValue('u_registration_status', 'submitted');
+        grFam.setValue('u_verification_status', 'pending_review');
+        grFam.setValue('u_case_status',       'new');
+        grFam.setValue('u_assigned_officer',  'Sarah Jenkins');
+        grFam.setValue('u_email',             head.email || '');
+        grFam.setValue('u_allow_customer_edit', false);
+        grFam.setValue('u_doc_request_pending', false);
+        sysFamId = grFam.insert();
+      } else {
+        grFam.setValue('u_family_name', familyName);
+        grFam.setValue('u_household_size', totalMembersCount);
+        if (famInfo.countryOfOrigin) grFam.setValue('u_country_of_origin', famInfo.countryOfOrigin);
+        if (head.email) grFam.setValue('u_email', head.email);
+        grFam.update();
+      }
 
-      // ── Accompanying family members ────────────────────────────────────
-      if (members && members.length > 0) {
-        for (var i = 0; i < members.length; i++) {
-          var m = members[i];
-          var grMem = new GlideRecord('u_bridge360_member');
-          grMem.initialize();
-          grMem.setValue('u_family',               sysFamId);
-          grMem.setValue('u_refugee_id',           ''); // Minted only on verification
-          grMem.setValue('u_is_head',              false);
-          grMem.setValue('u_relationship_to_head', (m.relationshipToHead || 'other').toLowerCase());
-          grMem.setValue('u_first_name',           m.firstName  || '');
-          grMem.setValue('u_last_name',            m.lastName   || head.lastName || 'Family');
-          grMem.setValue('u_gender',               (m.gender || 'other').toLowerCase());
-          grMem.setValue('u_date_of_birth',        m.dateOfBirth || '');
-          grMem.setValue('u_nationality',          m.nationality || head.nationality || famInfo.countryOfOrigin || '');
-          grMem.setValue('u_verification_status',  'pending');
-          grMem.insert();
+      // ── 2. Member Persistence ──
+      var persistedMembersSummary = [];
+      var headSysId = '';
+
+      if (familyMembers && familyMembers.length > 0) {
+        var applicantMember = null;
+        if (selectedApplicantId) {
+          for (var f = 0; f < familyMembers.length; f++) {
+            if (familyMembers[f].id === selectedApplicantId) {
+              applicantMember = familyMembers[f];
+              break;
+            }
+          }
+        }
+        if (!applicantMember) {
+          applicantMember = familyMembers[0];
+        }
+
+        for (var mIdx = 0; mIdx < familyMembers.length; mIdx++) {
+          var fm = familyMembers[mIdx];
+          var isThisHead = (fm.id === applicantMember.id);
+
+          var rawName = (fm.name || (fm.firstName ? (fm.firstName + ' ' + (fm.lastName || '')) : '')).trim();
+          var nameParts = rawName ? rawName.split(/\\s+/) : [];
+          var mFirst = fm.firstName || (nameParts.length > 0 ? nameParts[0] : (isThisHead ? 'Applicant' : 'Family'));
+          var mLast = fm.lastName || (nameParts.length > 1 ? nameParts[nameParts.length - 1] : (head.lastName || 'Family'));
+          var mMiddle = fm.middleName || (nameParts.length > 2 ? nameParts.slice(1, -1).join(' ') : '');
+
+          var mRel = normalizeRelationship(fm.relationshipToHead || (isThisHead ? 'self' : 'other'), isThisHead);
+          var mGender = normalizeGender(fm.gender || (isThisHead ? head.gender : 'other'));
+          var mDob = normalizeDate(fm.dateOfBirth || (isThisHead ? head.dateOfBirth : ''));
+          var mNationalId = fm.memberIdentifier || (isThisHead ? (head.nationalId || '') : '');
+
+          var grExistingMem = new GlideRecord('u_bridge360_member');
+          grExistingMem.addQuery('u_family', sysFamId);
+          if (isThisHead) {
+            grExistingMem.addQuery('u_is_head', true);
+          } else {
+            grExistingMem.addQuery('u_is_head', false);
+            grExistingMem.addQuery('u_first_name', mFirst);
+            grExistingMem.addQuery('u_last_name', mLast);
+          }
+          grExistingMem.query();
+
+          var currentMemSysId = '';
+          if (grExistingMem.next()) {
+            currentMemSysId = grExistingMem.getUniqueValue();
+            grExistingMem.setValue('u_first_name', mFirst);
+            grExistingMem.setValue('u_middle_name', mMiddle);
+            grExistingMem.setValue('u_last_name', mLast);
+            grExistingMem.setValue('u_relationship_to_head', mRel);
+            grExistingMem.setValue('u_is_head', isThisHead);
+            if (mGender) grExistingMem.setValue('u_gender', mGender);
+            if (mDob) grExistingMem.setValue('u_date_of_birth', mDob);
+            if (mNationalId) grExistingMem.setValue('u_national_id', mNationalId);
+            if (isThisHead) {
+              if (head.passportNumber) grExistingMem.setValue('u_passport_number', head.passportNumber);
+              if (head.mobileNumber) grExistingMem.setValue('u_mobile_number', head.mobileNumber);
+              if (head.email) grExistingMem.setValue('u_email', head.email);
+              if (head.address) grExistingMem.setValue('u_address', head.address);
+              if (head.city) grExistingMem.setValue('u_city', head.city);
+              if (head.state) grExistingMem.setValue('u_state', head.state);
+              if (head.postalCode) grExistingMem.setValue('u_postal_code', head.postalCode);
+              if (head.nationality) grExistingMem.setValue('u_nationality', head.nationality);
+            }
+            grExistingMem.update();
+          } else {
+            var grNewMem = new GlideRecord('u_bridge360_member');
+            grNewMem.initialize();
+            grNewMem.setValue('u_family', sysFamId);
+            grNewMem.setValue('u_refugee_id', '');
+            grNewMem.setValue('u_is_head', isThisHead);
+            grNewMem.setValue('u_relationship_to_head', mRel);
+            grNewMem.setValue('u_first_name', mFirst);
+            grNewMem.setValue('u_middle_name', mMiddle);
+            grNewMem.setValue('u_last_name', mLast);
+            grNewMem.setValue('u_gender', mGender);
+            grNewMem.setValue('u_date_of_birth', mDob);
+            grNewMem.setValue('u_nationality', isThisHead ? (head.nationality || famInfo.countryOfOrigin || '') : (famInfo.countryOfOrigin || ''));
+            grNewMem.setValue('u_national_id', mNationalId);
+            if (isThisHead) {
+              grNewMem.setValue('u_passport_number', head.passportNumber || '');
+              grNewMem.setValue('u_mobile_number', head.mobileNumber || '');
+              grNewMem.setValue('u_email', head.email || '');
+              grNewMem.setValue('u_address', head.address || '');
+              grNewMem.setValue('u_city', head.city || '');
+              grNewMem.setValue('u_state', head.state || '');
+              grNewMem.setValue('u_postal_code', head.postalCode || '');
+            }
+            grNewMem.setValue('u_verification_status', 'pending');
+            currentMemSysId = grNewMem.insert();
+          }
+
+          if (isThisHead) {
+            headSysId = currentMemSysId;
+          }
+
+          persistedMembersSummary.push({
+            clientTempId: fm.id,
+            sys_id: currentMemSysId,
+            fullName: mFirst + (mLast ? (' ' + mLast) : ''),
+            firstName: mFirst,
+            lastName: mLast,
+            relationship: mRel,
+            gender: mGender,
+            dateOfBirth: mDob,
+            isHead: isThisHead
+          });
+        }
+      } else {
+        var grHeadChk = new GlideRecord('u_bridge360_member');
+        grHeadChk.addQuery('u_family', sysFamId);
+        grHeadChk.addQuery('u_is_head', true);
+        grHeadChk.query();
+
+        var headFirst = head.firstName || 'Applicant';
+        var headLast  = head.lastName  || 'Family';
+        var headGender = normalizeGender(head.gender);
+        var headDob = normalizeDate(head.dateOfBirth);
+
+        if (grHeadChk.next()) {
+          headSysId = grHeadChk.getUniqueValue();
+          grHeadChk.setValue('u_first_name', headFirst);
+          grHeadChk.setValue('u_middle_name', head.middleName || '');
+          grHeadChk.setValue('u_last_name', headLast);
+          grHeadChk.setValue('u_gender', headGender);
+          grHeadChk.setValue('u_date_of_birth', headDob);
+          grHeadChk.setValue('u_nationality', head.nationality || famInfo.countryOfOrigin || '');
+          grHeadChk.setValue('u_passport_number', head.passportNumber || '');
+          grHeadChk.setValue('u_national_id', head.nationalId || '');
+          grHeadChk.setValue('u_mobile_number', head.mobileNumber || '');
+          grHeadChk.setValue('u_email', head.email || '');
+          grHeadChk.setValue('u_address', head.address || '');
+          grHeadChk.setValue('u_city', head.city || '');
+          grHeadChk.setValue('u_state', head.state || '');
+          grHeadChk.setValue('u_postal_code', head.postalCode || '');
+          grHeadChk.update();
+        } else {
+          var grHead = new GlideRecord('u_bridge360_member');
+          grHead.initialize();
+          grHead.setValue('u_family',              sysFamId);
+          grHead.setValue('u_refugee_id',          '');
+          grHead.setValue('u_is_head',             true);
+          grHead.setValue('u_relationship_to_head','self');
+          grHead.setValue('u_first_name',          headFirst);
+          grHead.setValue('u_middle_name',         head.middleName || '');
+          grHead.setValue('u_last_name',           headLast);
+          grHead.setValue('u_gender',              headGender);
+          grHead.setValue('u_date_of_birth',       headDob);
+          grHead.setValue('u_nationality',         head.nationality || famInfo.countryOfOrigin || '');
+          grHead.setValue('u_passport_number',     head.passportNumber || '');
+          grHead.setValue('u_national_id',         head.nationalId   || '');
+          grHead.setValue('u_mobile_number',       head.mobileNumber || '');
+          grHead.setValue('u_email',               head.email        || '');
+          grHead.setValue('u_address',             head.address      || '');
+          grHead.setValue('u_city',                head.city         || '');
+          grHead.setValue('u_state',               head.state        || '');
+          grHead.setValue('u_postal_code',         head.postalCode   || '');
+          grHead.setValue('u_verification_status', 'pending');
+          headSysId = grHead.insert();
+        }
+
+        persistedMembersSummary.push({
+          clientTempId: head.id || 'MEM-HEAD',
+          sys_id: headSysId,
+          fullName: headFirst + ' ' + headLast,
+          firstName: headFirst,
+          lastName: headLast,
+          relationship: 'self',
+          gender: headGender,
+          dateOfBirth: headDob,
+          isHead: true
+        });
+
+        if (members && members.length > 0) {
+          for (var i = 0; i < members.length; i++) {
+            var m = members[i];
+            var mFirst = m.firstName || 'Family';
+            var mLast  = m.lastName  || headLast;
+            var mRel   = normalizeRelationship(m.relationshipToHead, false);
+            var mGen   = normalizeGender(m.gender);
+            var mDob   = normalizeDate(m.dateOfBirth);
+
+            var grMemChk = new GlideRecord('u_bridge360_member');
+            grMemChk.addQuery('u_family', sysFamId);
+            grMemChk.addQuery('u_is_head', false);
+            grMemChk.addQuery('u_first_name', mFirst);
+            grMemChk.addQuery('u_last_name', mLast);
+            grMemChk.query();
+
+            var memSysId = '';
+            if (grMemChk.next()) {
+              memSysId = grMemChk.getUniqueValue();
+              grMemChk.setValue('u_relationship_to_head', mRel);
+              grMemChk.setValue('u_gender', mGen);
+              grMemChk.setValue('u_date_of_birth', mDob);
+              grMemChk.update();
+            } else {
+              var grMem = new GlideRecord('u_bridge360_member');
+              grMem.initialize();
+              grMem.setValue('u_family',               sysFamId);
+              grMem.setValue('u_refugee_id',           '');
+              grMem.setValue('u_is_head',              false);
+              grMem.setValue('u_relationship_to_head', mRel);
+              grMem.setValue('u_first_name',           mFirst);
+              grMem.setValue('u_last_name',            mLast);
+              grMem.setValue('u_gender',               mGen);
+              grMem.setValue('u_date_of_birth',        mDob);
+              grMem.setValue('u_nationality',          m.nationality || head.nationality || famInfo.countryOfOrigin || '');
+              grMem.setValue('u_verification_status',  'pending');
+              memSysId = grMem.insert();
+            }
+
+            persistedMembersSummary.push({
+              clientTempId: m.id || ('MEM-' + (i + 2)),
+              sys_id: memSysId,
+              fullName: mFirst + ' ' + mLast,
+              firstName: mFirst,
+              lastName: mLast,
+              relationship: mRel,
+              gender: mGen,
+              dateOfBirth: mDob,
+              isHead: false
+            });
+          }
         }
       }
 
-      // ── Documents ──────────────────────────────────────────────────────
+      // ── 3. Supporting Documents ──
       if (docs && docs.length > 0) {
         for (var d = 0; d < docs.length; d++) {
           var doc = docs[d];
-          var grDoc = new GlideRecord('u_bridge360_document');
-          grDoc.initialize();
-          grDoc.setValue('u_family',              sysFamId);
-          grDoc.setValue('u_member',              headSysId);
-          grDoc.setValue('u_application_id',      appId);
-          grDoc.setValue('u_document_type',       (doc.documentType || 'passport').toLowerCase().replace(/\\s+/g, '_'));
-          grDoc.setValue('u_file_name',           doc.fileName  || '');
-          grDoc.setValue('u_file_size',           doc.fileSize  || '');
-          grDoc.setValue('u_verification_status', 'pending');
-          if (doc.extractedJson) {
-            grDoc.setValue('u_extracted_json', typeof doc.extractedJson === 'string' ? doc.extractedJson : JSON.stringify(doc.extractedJson));
+          var docFileName = doc.fileName || '';
+          
+          var docMemberSysId = headSysId;
+          if (doc.memberId) {
+            for (var p = 0; p < persistedMembersSummary.length; p++) {
+              if (persistedMembersSummary[p].clientTempId === doc.memberId) {
+                docMemberSysId = persistedMembersSummary[p].sys_id;
+                break;
+              }
+            }
           }
-          grDoc.insert();
+
+          var grDocChk = new GlideRecord('u_bridge360_document');
+          grDocChk.addQuery('u_family', sysFamId);
+          grDocChk.addQuery('u_file_name', docFileName);
+          grDocChk.query();
+          if (!grDocChk.next()) {
+            var grDoc = new GlideRecord('u_bridge360_document');
+            grDoc.initialize();
+            grDoc.setValue('u_family',              sysFamId);
+            grDoc.setValue('u_member',              docMemberSysId);
+            grDoc.setValue('u_application_id',      appId);
+            grDoc.setValue('u_document_type',       (doc.documentType || 'passport').toLowerCase().replace(/\s+/g, '_'));
+            grDoc.setValue('u_file_name',           docFileName);
+            grDoc.setValue('u_file_size',           doc.fileSize  || '');
+            grDoc.setValue('u_verification_status', 'pending');
+            if (doc.extractedJson) {
+              grDoc.setValue('u_extracted_json', typeof doc.extractedJson === 'string' ? doc.extractedJson : JSON.stringify(doc.extractedJson));
+            }
+            grDoc.insert();
+          }
         }
       }
 
       return {
         success:       true,
         applicationId: appId,
-        message:       'Registration submitted successfully. Please note your Application ID for status tracking.'
+        familySysId:   sysFamId,
+        headSysId:     headSysId,
+        applicantMemberSysId: headSysId,
+        persistedMembers: persistedMembersSummary,
+        message:       'Registration submitted successfully with ' + persistedMembersSummary.length + ' members persisted. Please note your Application ID for status tracking.'
       };
     } catch (e) {
       gs.log('Bridge360 submitRegistration Exception: ' + e);

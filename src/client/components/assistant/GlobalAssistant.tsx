@@ -62,9 +62,9 @@ export const GlobalAssistant: React.FC = () => {
   const guideTargetElementRef = useRef<Element | null>(null);
   const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const guideReturnTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const launcherTapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastActivityAtRef = useRef(Date.now());
   const lastPointerSampleRef = useRef(0);
-  const lastLauncherTapRef = useRef(0);
 
   const clampPosition = useCallback((position: DockPosition): DockPosition => ({
     right: Math.min(Math.max(0, position.right), Math.max(0, window.innerWidth - DOCK_WIDTH)),
@@ -142,15 +142,21 @@ export const GlobalAssistant: React.FC = () => {
       suppressClickRef.current = false;
       return;
     }
-    const now = Date.now();
-    if (now - lastLauncherTapRef.current < 360) {
+    if (launcherTapTimerRef.current !== null) {
+      clearTimeout(launcherTapTimerRef.current);
+      launcherTapTimerRef.current = null;
       setAssistantEnabled(!assistantEnabled);
-      lastLauncherTapRef.current = 0;
       return;
     }
-    lastLauncherTapRef.current = now;
-    setIsOpen(!isOpen);
+    launcherTapTimerRef.current = window.setTimeout(() => {
+      launcherTapTimerRef.current = null;
+      setIsOpen(!isOpen);
+    }, 300);
   };
+
+  useEffect(() => () => {
+    if (launcherTapTimerRef.current !== null) clearTimeout(launcherTapTimerRef.current);
+  }, []);
 
   // Route → portal (admin vs customer).
   useEffect(() => {

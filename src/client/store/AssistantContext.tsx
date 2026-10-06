@@ -60,7 +60,12 @@ export type MascotAnimation =
   | 'idle-cape'
   | 'idle-spin'
   | 'idle-shrug'
-  | 'idle-peek';
+  | 'idle-peek'
+  | 'idle-cheer'
+  | 'idle-moonwalk'
+  | 'idle-juggle'
+  | 'idle-spinbow'
+  | 'idle-heart';
 
 export interface AssistantActivity {
   kind: 'input' | 'action' | 'navigation' | 'error';

@@ -31,8 +31,17 @@ import {
   CheckSquare
 } from 'lucide-react';
 import { useBridge360 } from '../../store/Bridge360Context';
-import { useAssistant } from '../../store/AssistantContext';
+import { useAssistant, type AgentRun } from '../../store/AssistantContext';
 import { InternPanel } from '../../components/assistant/InternPanel';
+
+const LOCAL_ADVISORY_STAGES: AgentRun['stages'] = [
+  { id: 'triage', label: 'Scout · Triage — case context', status: 'pending' },
+  { id: 'docs', label: 'Prism · Document Analyst — initial text matching', status: 'pending' },
+  { id: 'completeness', label: 'Ledger · Completeness — required information', status: 'pending' },
+  { id: 'support', label: 'Beacon · Support Planner — recorded needs', status: 'pending' },
+  { id: 'risk', label: 'Aegis · Record Integrity — evidence review', status: 'pending' },
+  { id: 'decision', label: 'Quill · Decision Drafter — advisory only', status: 'pending' },
+];
 
 export const Family360View: React.FC = () => {
   const {
@@ -80,24 +89,52 @@ export const Family360View: React.FC = () => {
     }
   }, [selectedFamilyId]);
 
-  const { registerActionHandler, setProactiveMessage } = useAssistant();
+  const {
+    registerActionHandler,
+    setProactiveMessage,
+    addAgentRun,
+    updateAgentRun,
+  } = useAssistant();
 
   React.useEffect(() => {
     const unregister = registerActionHandler(async (actionType: string) => {
       if (actionType === 'VERIFY_DOCUMENTS' && selectedFamilyId) {
-        setProactiveMessage('I am preparing a read-only advisory assessment with six specialist checks. No case or document records will be changed.');
+        setProactiveMessage("I'm preparing a read-only advisory assessment with six specialist checks. Case/document statuses, assignments, and approvals will remain unchanged.");
+        const runId = `local-advisory-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        let stages = LOCAL_ADVISORY_STAGES.map(stage => ({ ...stage }));
+        addAgentRun({
+          id: runId,
+          title: 'Read-only advisory assessment',
+          status: 'running',
+          stages,
+          startedAt: Date.now(),
+        });
         try {
-          const res = await runAgenticWorkflow(selectedFamilyId);
-          const summary = `Advisory assessment ready; no records changed. Current assignment: ${res.triage.assignedOfficer} (${res.triage.priority}). Document Analyst: ${res.docAnalysis.status} (${res.docAnalysis.initialMatchCount} initial text match(es), not verified). Completeness: ${res.completenessReview.status}. Record integrity: ${res.riskAssessment.score}. Support suggestions: ${res.supportPlan.recommendations.length}. Draft: ${res.decisionDraft.recommendation}.`;
+          const res = await runAgenticWorkflow(selectedFamilyId, (stageId, status, detail) => {
+            stages = stages.map(stage =>
+              stage.id === stageId ? { ...stage, status, detail } : stage,
+            );
+            updateAgentRun(runId, { stages });
+          });
+          updateAgentRun(runId, {
+            status: 'completed',
+            resultSummary: 'Draft ready; case/document statuses and assignments are unchanged.',
+          });
+          const summary = `Advisory assessment ready; a draft note and timeline entry were added. Case/document statuses and assignments remain unchanged. Current assignment: ${res.triage.assignedOfficer} (${res.triage.priority}). Document Analyst: ${res.docAnalysis.status} (${res.docAnalysis.initialMatchCount} initial text match(es), not verified). Completeness: ${res.completenessReview.status}. Record integrity: ${res.riskAssessment.score}. Support suggestions: ${res.supportPlan.recommendations.length}. Draft: ${res.decisionDraft.recommendation}.`;
           setProactiveMessage(summary);
         } catch (e) {
           console.error(e);
-          setProactiveMessage("Oops! The agentic workflow run encountered an error.");
+          const message = e instanceof Error ? e.message : String(e);
+          stages = stages.map(stage => stage.status === 'active'
+            ? { ...stage, status: 'error', detail: message }
+            : stage);
+          updateAgentRun(runId, { status: 'error', stages });
+          setProactiveMessage(`The advisory assessment couldn't complete: ${message}`);
         }
       }
     });
     return unregister;
-  }, [selectedFamilyId, runAgenticWorkflow, registerActionHandler, setProactiveMessage]);
+  }, [selectedFamilyId, runAgenticWorkflow, registerActionHandler, setProactiveMessage, addAgentRun, updateAgentRun]);
 
   const [searchTerm, setSearchTerm] = useState<string>('');
 

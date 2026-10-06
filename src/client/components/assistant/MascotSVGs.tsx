@@ -286,6 +286,11 @@ const GESTURE_MS: Partial<Record<MascotAnimation, number>> = {
   'idle-spin': 2200,
   'idle-shrug': 1900,
   'idle-peek': 1900,
+  'idle-cheer': 2200,
+  'idle-moonwalk': 2600,
+  'idle-juggle': 2400,
+  'idle-spinbow': 2200,
+  'idle-heart': 2300,
 };
 
 const RiggedMascot: React.FC<{
@@ -362,6 +367,11 @@ const RiggedMascot: React.FC<{
         @keyframes rig-skate { 0%,100%{transform:translateX(0) rotate(0)} 30%{transform:translateX(-12px) rotate(-5deg)} 70%{transform:translateX(12px) rotate(5deg)} }
         @keyframes rig-salute { 0%,100%{transform:rotate(0)} 35%,75%{transform:rotate(-45deg)} }
         @keyframes rig-shrug { 0%,100%{transform:rotate(0)} 40%,75%{transform:rotate(-14deg)} }
+        @keyframes rig-cheer { 0%,100%{transform:translateY(0) scale(1)} 35%{transform:translateY(-20px) scale(1.04)} 70%{transform:translateY(-5px) scale(1.01)} }
+        @keyframes rig-moonwalk { 0%,100%{transform:translateX(0)} 25%{transform:translateX(13px)} 75%{transform:translateX(-13px)} }
+        @keyframes rig-juggle { 0%,100%{transform:rotate(0)} 30%{transform:rotate(-9deg) translateY(-6px)} 70%{transform:rotate(9deg) translateY(-3px)} }
+        @keyframes rig-spinbow { 0%,100%{transform:rotate(0)} 50%{transform:rotate(180deg)} }
+        @keyframes rig-heart { 0%,100%{transform:scale(1)} 35%{transform:scale(1.12)} 65%{transform:scale(.96)} }
 
         .rig-torso { animation: rig-breathe 4.5s ease-in-out infinite; }
         svg[data-anim="talk"] .rig-mouth { animation: rig-talk .34s ease-in-out infinite; }
@@ -400,6 +410,16 @@ const RiggedMascot: React.FC<{
         svg[data-anim="idle-shrug"] .rig-arm-r,
         svg[data-anim="idle-shrug"] .rig-arm-l { animation: rig-shrug .8s ease-in-out 2; }
         svg[data-anim="idle-peek"] .rig-head { animation: rig-peek .7s ease-in-out 2; }
+        svg[data-anim="idle-cheer"] .rig-root { animation: rig-cheer .75s ease-in-out 3; }
+        svg[data-anim="idle-cheer"] .rig-arm-r,
+        svg[data-anim="idle-cheer"] .rig-arm-l { animation: rig-stretch-r .7s ease-in-out 3; }
+        svg[data-anim="idle-moonwalk"] .rig-root { animation: rig-moonwalk .8s ease-in-out 3; }
+        svg[data-anim="idle-moonwalk"] .rig-leg-l { animation: rig-kick-l .7s ease-in-out 3; }
+        svg[data-anim="idle-moonwalk"] .rig-leg-r { animation: rig-kick-r .7s ease-in-out 3; }
+        svg[data-anim="idle-juggle"] .rig-root { animation: rig-juggle .7s ease-in-out 3; }
+        svg[data-anim="idle-juggle"] .rig-arm-r { animation: rig-wave .65s ease-in-out 3; }
+        svg[data-anim="idle-spinbow"] .rig-root { animation: rig-spinbow .85s ease-in-out 2; }
+        svg[data-anim="idle-heart"] .rig-root { animation: rig-heart .7s ease-in-out 3; }
       `}</style>
 
       <Defs id={id} skin={s} />

@@ -174,10 +174,13 @@ const MainAppContent: React.FC = () => {
   // Landing Page (default entry point)
   if (selectedPortal === 'landing' || selectedPortal === 'gateway') {
     return (
-      <LandingPage
-        onLaunchCustomer={launchCustomerPortal}
-        onLaunchAdmin={launchAdminPortal}
-      />
+      <>
+        <LandingPage
+          onLaunchCustomer={launchCustomerPortal}
+          onLaunchAdmin={launchAdminPortal}
+        />
+        <GlobalAssistant />
+      </>
     );
   }
 
@@ -204,7 +207,7 @@ const MainAppContent: React.FC = () => {
               onClick={() => navigateCustomerMode('landing')}
             >
               <Bridge360Logo
-                size={34}
+                size={38}
                 showText={true}
                 badgeText="CUSTOMER PORTAL"
                 badgeColor="#16A34A"
@@ -310,9 +313,9 @@ const MainAppContent: React.FC = () => {
           </div>
         </div>
       )}
-      
-      {/* Render Assistant only when not on landing page */}
-      {!(selectedPortal === 'customer' && customerMode === 'landing') && <GlobalAssistant />}
+
+      {/* Render Assistant across all views */}
+      <GlobalAssistant />
     </div>
   );
 };

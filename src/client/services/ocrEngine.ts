@@ -12,6 +12,8 @@
 //   4. Position heuristic – last-resort name finder for documents with no labels
 //   5. Phone → country    – libphonenumber-js (MIT, bundled) + Intl.DisplayNames
 
+import { ExtractedFamilyMemberData } from '../types/bridge360';
+
 export interface ExtractedField {
   value: string;
   confidence: number; // 0–100
@@ -22,6 +24,7 @@ export interface ExtractionResult {
   method: 'MRZ' | 'LABEL' | 'NONE';
   rawText: string;
   fields: Record<string, ExtractedField>;
+  familyMembers?: ExtractedFamilyMemberData[];
 }
 
 // ---------------------------------------------------------------------------
@@ -143,7 +146,7 @@ function mrzChecksum(input: string): number {
   let sum = 0;
   for (let i = 0; i < input.length; i++)
     sum += MRZ_CHAR_VALUE(input[i]) * MRZ_WEIGHTS[i % 3];
-  return sum % 10;
+  return sum - Math.floor(sum / 10) * 10;
 }
 
 function mrzDateToISO(yyMMdd: string): string | null {
@@ -151,7 +154,8 @@ function mrzDateToISO(yyMMdd: string): string | null {
   const yy = parseInt(yyMMdd.slice(0, 2), 10);
   const mm = yyMMdd.slice(2, 4);
   const dd = yyMMdd.slice(4, 6);
-  const currentYY = new Date().getFullYear() % 100;
+  const fullYear = new Date().getFullYear();
+  const currentYY = fullYear - Math.floor(fullYear / 100) * 100;
   const century = yy > currentYY + 20 ? 1900 : 2000;
   return `${century + yy}-${mm}-${dd}`;
 }
@@ -839,6 +843,227 @@ export function extractFieldsFromText(
   return layer1Fields;
 }
 
+export function extractFamilyMembers(
+  rawText: string,
+  layer1Fields: Record<string, ExtractedField>,
+  expectedFields?: Array<{ name: string; type?: string }>
+): ExtractedFamilyMemberData[] {
+  const members: ExtractedFamilyMemberData[] = [];
+  const seenNames = new Set<string>();
+
+  const addMember = (m: Partial<ExtractedFamilyMemberData>) => {
+    if (!m.name || !m.name.trim()) return;
+    const cleanName = m.name.trim();
+    const key = cleanName.toLowerCase();
+    if (seenNames.has(key)) return;
+    seenNames.add(key);
+
+    const nameParts = cleanName.split(/\s+/).filter(Boolean);
+    const firstName = m.firstName || (nameParts[0] || '');
+    const lastName = m.lastName || (nameParts.length > 1 ? nameParts[nameParts.length - 1] : '');
+    const middleName = m.middleName || (nameParts.length > 2 ? nameParts.slice(1, -1).join(' ') : '');
+
+    members.push({
+      id: m.id || `MEMBER-${Date.now()}-${members.length + 1}`,
+      name: cleanName,
+      firstName,
+      middleName,
+      lastName,
+      relationshipToHead: m.relationshipToHead || (members.length === 0 ? 'Head' : 'Other'),
+      dateOfBirth: m.dateOfBirth || '',
+      gender: m.gender || '',
+      memberIdentifier: m.memberIdentifier || '',
+      confidence: m.confidence || 90,
+      source: m.source || 'Document Extraction',
+      fieldConfidence: m.fieldConfidence || {},
+    });
+  };
+
+  // 1. JSON Array Strategy: Check layer1Fields['family_members']
+  if (layer1Fields['family_members']?.value) {
+    try {
+      const parsed = JSON.parse(layer1Fields['family_members'].value);
+      if (Array.isArray(parsed)) {
+        for (const item of parsed) {
+          if (typeof item === 'object' && item !== null) {
+            const mName = item.name || item.full_name || [item.first_name, item.last_name].filter(Boolean).join(' ');
+            if (mName) {
+              addMember({
+                name: mName,
+                relationshipToHead: item.relationship || item.relationshipToHead || item.rel,
+                dateOfBirth: item.date_of_birth || item.dob || item.birth_date,
+                gender: item.gender || item.sex,
+                memberIdentifier: item.id || item.identifier || item.national_id || item.nik || item.rrn || item.aadhaar,
+                confidence: 95,
+                source: 'JSON Schema (ServiceNow)',
+              });
+            }
+          }
+        }
+      }
+    } catch {}
+  }
+
+  // 2. Check if rawText contains an embedded JSON array of members
+  if (members.length === 0) {
+    const jsonMatch = rawText.match(/\[\s*\{[\s\S]*?"(?:name|relationship|dob|date_of_birth)"[\s\S]*?\}\s*\]/);
+    if (jsonMatch) {
+      try {
+        const parsed = JSON.parse(jsonMatch[0]);
+        if (Array.isArray(parsed)) {
+          for (const item of parsed) {
+            const mName = item.name || item.full_name || [item.first_name, item.last_name].filter(Boolean).join(' ');
+            if (mName) {
+              addMember({
+                name: mName,
+                relationshipToHead: item.relationship || item.relationshipToHead,
+                dateOfBirth: item.date_of_birth || item.dob,
+                gender: item.gender || item.sex,
+                memberIdentifier: item.id || item.identifier || item.national_id,
+                confidence: 94,
+                source: 'Structured Document JSON',
+              });
+            }
+          }
+        }
+      } catch {}
+    }
+  }
+
+  // 3. Extract Head of Family from family-level fields (e.g. card_holder_name, head_of_household_name)
+  const headFieldKeys = [
+    'head_of_household_name',
+    'head_of_family_name',
+    'family_head_name',
+    'household_head_name',
+    'card_holder_name',
+    'house_owner_name',
+    'applicant_name'
+  ];
+  for (const hKey of headFieldKeys) {
+    const fObj = layer1Fields[hKey];
+    if (fObj && fObj.value && fObj.value.trim().length >= 2) {
+      const headName = fObj.value.trim();
+      if (!seenNames.has(headName.toLowerCase())) {
+        const dobVal = layer1Fields['date_of_birth']?.value || layer1Fields['dob']?.value || '';
+        const genderVal = layer1Fields['gender']?.value || layer1Fields['sex']?.value || '';
+        const idVal = layer1Fields['applicant_rrn']?.value || layer1Fields['individual_id']?.value || '';
+        addMember({
+          name: headName,
+          relationshipToHead: 'Head',
+          dateOfBirth: dobVal,
+          gender: genderVal,
+          memberIdentifier: idVal,
+          confidence: fObj.confidence || 92,
+          source: `${fObj.source || 'label'} (${hKey})`,
+        });
+      }
+      break;
+    }
+  }
+
+  // 4. Check family_members_names (comma / semicolon / newline separated list)
+  if (layer1Fields['family_members_names']?.value) {
+    const namesVal = layer1Fields['family_members_names'].value;
+    const splitNames = namesVal.split(/[,;\n|]+/).map(s => s.trim()).filter(s => s.length >= 2);
+    for (const sName of splitNames) {
+      if (!seenNames.has(sName.toLowerCase())) {
+        addMember({
+          name: sName,
+          relationshipToHead: members.length === 0 ? 'Head' : 'Dependant',
+          confidence: layer1Fields['family_members_names'].confidence || 86,
+          source: 'family_members_names',
+        });
+      }
+    }
+  }
+
+  // 5. Line-by-Line Table & Roster Parser across rawText
+  const lines = rawText.split('\n').map(l => l.trim()).filter(Boolean);
+  const relMap: Record<string, string> = {
+    head: 'Head', self: 'Head', kepala: 'Head', 'chủ hộ': 'Head',
+    spouse: 'Spouse', wife: 'Spouse', husband: 'Spouse', istri: 'Spouse', suami: 'Spouse',
+    son: 'Son', daughter: 'Daughter', child: 'Son', children: 'Son', anak: 'Son',
+    father: 'Father', mother: 'Mother', parent: 'Father', ayah: 'Father', ibu: 'Mother',
+    brother: 'Sibling', sister: 'Sibling', sibling: 'Sibling', saudara: 'Sibling',
+    dependant: 'Dependant', other: 'Other',
+  };
+
+  const relRegex = /\b(Head|Self|Spouse|Wife|Husband|Son|Daughter|Child|Children|Father|Mother|Parent|Brother|Sister|Sibling|Dependant|Kepala|Istri|Suami|Anak|Ayah|Ibu|户主|妻子|配偶|子|女|儿|父|母|Chủ hộ|Vợ|Chồng|Con|世帯主|妻|夫|배우자|자녀|본인|मुखिया|पत्नी|पति|बेटा|बेटी)\b/i;
+  const dobRegex = /\b(\d{1,2}[\/.-]\d{1,2}[\/.-]\d{2,4}|\d{4}[\/.-]\d{1,2}[\/.-]\d{1,2})\b/;
+  const genderRegex = /\b(Male|Female|M|F|Laki-laki|Perempuan|Pria|Wanita|男|女|Nam|Nữ)\b/i;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+
+    // Explicit "Name: ... Relation: ..." format
+    const nameLabelMatch = line.match(/(?:Name|Full Name|Nama|Họ và tên|姓名|氏名|이름|नाम)[\s:=#\-]+([a-zA-Z\p{L}\s.'-]+?)(?=[,\t|]|\s{2,}|$)/u);
+    if (nameLabelMatch && nameLabelMatch[1]) {
+      const candidateName = nameLabelMatch[1].trim();
+      if (candidateName.length >= 3 && !seenNames.has(candidateName.toLowerCase())) {
+        let relFound = 'Other';
+        const rMatch = line.match(relRegex) || (lines[i + 1] && lines[i + 1].match(relRegex));
+        if (rMatch) {
+          relFound = relMap[rMatch[1].toLowerCase()] || rMatch[1];
+        }
+        const dMatch = line.match(dobRegex) || (lines[i + 1] && lines[i + 1].match(dobRegex));
+        const gMatch = line.match(genderRegex) || (lines[i + 1] && lines[i + 1].match(genderRegex));
+        let normGender = '';
+        if (gMatch) {
+          const gRaw = gMatch[1].toLowerCase();
+          normGender = (gRaw.startsWith('f') || gRaw.startsWith('p') || gRaw === '女' || gRaw === 'nữ') ? 'Female' : 'Male';
+        }
+
+        addMember({
+          name: toTitleCase(candidateName),
+          relationshipToHead: relFound,
+          dateOfBirth: dMatch ? dMatch[1] : '',
+          gender: normGender,
+          confidence: 88,
+          source: 'OCR Member Pattern',
+        });
+        continue;
+      }
+    }
+
+    // Numbered roster row: e.g. "1. John Doe - Spouse - 1985-05-12 - Female"
+    const numberedPrefixMatch = line.match(/^(?:[0-9]{1,2}[.)\s|]+)\s*(.+)$/u);
+    if (numberedPrefixMatch) {
+      const restLine = numberedPrefixMatch[1].trim();
+      const parts = restLine.split(/\s*[,|\-;\t]\s*/);
+      if (parts.length >= 2) {
+        const candidateName = parts[0].trim();
+        const rest = parts.slice(1).join(' - ');
+        if (!seenNames.has(candidateName.toLowerCase()) && !/^(total|date|place|page|signature|authority|district|province)/i.test(candidateName)) {
+          let relFound = 'Other';
+          const rMatch = rest.match(relRegex);
+        if (rMatch) {
+          relFound = relMap[rMatch[1].toLowerCase()] || rMatch[1];
+        }
+        const dMatch = rest.match(dobRegex);
+        const gMatch = rest.match(genderRegex);
+        let normGender = '';
+        if (gMatch) {
+          const gRaw = gMatch[1].toLowerCase();
+          normGender = (gRaw.startsWith('f') || gRaw.startsWith('p') || gRaw === '女' || gRaw === 'nữ') ? 'Female' : 'Male';
+        }
+
+        addMember({
+          name: toTitleCase(candidateName),
+          relationshipToHead: relFound,
+          dateOfBirth: dMatch ? dMatch[1] : '',
+          gender: normGender,
+          confidence: 87,
+          source: 'OCR Table Roster',
+        });
+        }
+      }
+    }
+  }
+
+  return members;
+}
+
 export async function extractDocumentFields(
   file: File,
   expectedFields?: Array<{ name: string; type?: string }>
@@ -851,7 +1076,19 @@ export async function extractDocumentFields(
   if (hasConfiguredSchema) {
     const layer1Fields = extractFieldsFromText(text, expectedFields);
     const method = Object.keys(layer1Fields).length ? 'LABEL' : 'NONE';
-    return { method, rawText: text, fields: layer1Fields };
+
+    // Check if this document has family_members configured (type === 'json' or name === 'family_members')
+    const isFamilyDoc = expectedFields.some(f =>
+      f.name === 'family_members' ||
+      (f.type && f.type.toLowerCase() === 'json')
+    );
+
+    let familyMembers: ExtractedFamilyMemberData[] | undefined;
+    if (isFamilyDoc) {
+      familyMembers = extractFamilyMembers(text, layer1Fields, expectedFields);
+    }
+
+    return { method, rawText: text, fields: layer1Fields, familyMembers };
   }
 
   // Fallback when no configured schema is supplied (standalone OCR without DB context)

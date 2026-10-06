@@ -122,9 +122,11 @@ class CentralTranslationEngineService {
 
   private syncServiceNowSession(lang: SupportedLanguage) {
     if (typeof window === 'undefined') return;
+    const token = (window as any).g_ck;
+    if (!token) return; // Only sync when active authenticated session exists to prevent browser 401 prompt
     fetch('/api/now/session', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'X-UserToken': token },
       body: JSON.stringify({ language: lang })
     }).catch(() => {});
   }

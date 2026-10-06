@@ -285,6 +285,14 @@ declare global {
                         }
                     },
                     {
+                        table: 'sys_choice_set'
+                        id: '0aa3d9b20cf74f1aa84f14a5c7adcf29'
+                        key: {
+                            name: 'u_bridge360_country_document'
+                            element: 'u_registration_scope'
+                        }
+                    },
+                    {
                         table: 'sys_choice'
                         id: '0ae985501dfc45919128e105fd371174'
                         key: {
@@ -1444,6 +1452,14 @@ declare global {
                     },
                     {
                         table: 'sys_dictionary'
+                        id: '4c175f5ac5e44c55bf16327af10d5e52'
+                        key: {
+                            name: 'u_bridge360_country_document'
+                            element: 'u_registration_scope'
+                        }
+                    },
+                    {
+                        table: 'sys_dictionary'
                         id: '4c1ea15b6857481798fff004af48335e'
                         key: {
                             name: 'u_bridge360_country'
@@ -1571,6 +1587,17 @@ declare global {
                         key: {
                             name: 'u_bridge360_case'
                             element: 'u_assigned_officer'
+                        }
+                    },
+                    {
+                        table: 'sys_choice'
+                        id: '55a036e6dd8a41f49d544c2c880b5727'
+                        key: {
+                            name: 'u_bridge360_country_document'
+                            element: 'u_registration_scope'
+                            value: 'individual'
+                            language: 'en'
+                            dependent_value: 'NULL'
                         }
                     },
                     {
@@ -1967,6 +1994,13 @@ declare global {
                             name: 'u_bridge360_case'
                             element: 'u_description'
                             language: 'en'
+                        }
+                    },
+                    {
+                        table: 'sys_ux_lib_asset'
+                        id: '69ae69f6b4c6483d90bf85be583a84cd'
+                        key: {
+                            name: '../../bridge360_updated_v2/bridge360_updated/bridge360/src/client/main'
                         }
                     },
                     {
@@ -2772,6 +2806,14 @@ declare global {
                         }
                     },
                     {
+                        table: 'sn_glider_source_artifact_m2m'
+                        id: '943361ec860d44739ffb043b29f4b57a'
+                        key: {
+                            application_file: '69ae69f6b4c6483d90bf85be583a84cd'
+                            source_artifact: '9273002f432840a591c3115f791fd518'
+                        }
+                    },
+                    {
                         table: 'sys_choice'
                         id: '94cd0c58d6bc4bc4a8f65098cb993a98'
                         key: {
@@ -2833,6 +2875,17 @@ declare global {
                         key: {
                             name: 'u_bridge360_ticket'
                             element: 'NULL'
+                        }
+                    },
+                    {
+                        table: 'sys_choice'
+                        id: '976abf1dfaa74958878407e18629149b'
+                        key: {
+                            name: 'u_bridge360_country_document'
+                            element: 'u_registration_scope'
+                            value: 'both'
+                            language: 'en'
+                            dependent_value: 'NULL'
                         }
                     },
                     {
@@ -3220,7 +3273,7 @@ declare global {
                     {
                         table: 'sn_glider_source_artifact_m2m'
                         id: 'a99f42a41cb64ae790e553075a863dc6'
-                        deleted: false
+                        deleted: true
                         key: {
                             application_file: 'e128f469876d4b3bb0883ad18a79b4bd'
                             source_artifact: '9273002f432840a591c3115f791fd518'
@@ -3324,7 +3377,7 @@ declare global {
                     {
                         table: 'sn_glider_source_artifact_m2m'
                         id: 'ad36a0a68a4a408bba02f63963bced35'
-                        deleted: false
+                        deleted: true
                         key: {
                             application_file: '45e0d7df543c472a96717ba491c75e85'
                             source_artifact: '9273002f432840a591c3115f791fd518'
@@ -3828,6 +3881,17 @@ declare global {
                     },
                     {
                         table: 'sys_choice'
+                        id: 'ca6216d6f4644e9ba1e61388aa36f399'
+                        key: {
+                            name: 'u_bridge360_country_document_field'
+                            element: 'u_field_type'
+                            value: 'json'
+                            language: 'en'
+                            dependent_value: 'NULL'
+                        }
+                    },
+                    {
+                        table: 'sys_choice'
                         id: 'caa6bc7b89424ad1add8024318506432'
                         key: {
                             name: 'u_bridge360_verification_request'
@@ -4060,6 +4124,15 @@ declare global {
                         id: 'd58efc63000a4aedaa43a9d95c0f232e'
                         key: {
                             name: 'u_bridge360_verification_authority'
+                        }
+                    },
+                    {
+                        table: 'sys_documentation'
+                        id: 'd59d3e9ebbbf4405bb1beedb9bff60d2'
+                        key: {
+                            name: 'u_bridge360_country_document'
+                            element: 'u_registration_scope'
+                            language: 'en'
                         }
                     },
                     {
@@ -4796,6 +4869,17 @@ declare global {
                             name: 'u_bridge360_verification_request'
                             element: 'u_outcome_summary'
                             language: 'en'
+                        }
+                    },
+                    {
+                        table: 'sys_choice'
+                        id: 'fac2448c8b8046edb5ccc18ba81eb3dc'
+                        key: {
+                            name: 'u_bridge360_country_document'
+                            element: 'u_registration_scope'
+                            value: 'family'
+                            language: 'en'
+                            dependent_value: 'NULL'
                         }
                     },
                     {

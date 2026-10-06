@@ -375,12 +375,12 @@ const serviceNowVerificationDriver: RunDriver = {
 };
 
 const LOCAL_STAGES = [
-  { id: 'triage', label: 'Triage — read-only case context' },
-  { id: 'docs', label: 'Document Analyst — initial text matching' },
-  { id: 'completeness', label: 'Completeness Agent — required information' },
-  { id: 'support', label: 'Support Planner — explicit support needs' },
-  { id: 'risk', label: 'Record Integrity Agent — evidence review' },
-  { id: 'decision', label: 'Decision Drafter — advisory only' },
+  { id: 'triage', label: 'Scout · Triage — read-only case context' },
+  { id: 'docs', label: 'Prism · Document Analyst — initial text matching' },
+  { id: 'completeness', label: 'Ledger · Completeness — required information' },
+  { id: 'support', label: 'Beacon · Support Planner — recorded support needs' },
+  { id: 'risk', label: 'Aegis · Record Integrity — evidence review' },
+  { id: 'decision', label: 'Quill · Decision Drafter — advisory only' },
   { id: 'ready', label: 'Results ready' },
 ];
 

@@ -53,11 +53,33 @@ export interface DocumentRecord {
   previewUrl?: string;
   fileDataUrl?: string;
   notes?: string;
+  familyMembers?: ExtractedFamilyMemberData[];
+}
+
+export type ApplicantMatchStatus = 'MATCH' | 'POSSIBLE MATCH' | 'NO MATCH' | 'NEEDS REVIEW';
+
+export interface ExtractedFamilyMemberData {
+  id: string;
+  name: string;
+  firstName?: string;
+  middleName?: string;
+  lastName?: string;
+  relationshipToHead?: string;
+  dateOfBirth?: string;
+  gender?: 'Male' | 'Female' | 'Other' | string;
+  memberIdentifier?: string;
+  confidence: number;
+  source: string;
+  fieldConfidence?: Record<string, number>;
+  isApplicant?: boolean;
+  matchStatus?: ApplicantMatchStatus;
+  serviceNowSysId?: string;
 }
 
 export interface FamilyMember {
   id: string;
   familyId: string;
+  serviceNowSysId?: string;
   refugeeId?: string;
   isHeadOfFamily: boolean;
   relationshipToHead: 'Self' | 'Spouse' | 'Son' | 'Daughter' | 'Father' | 'Mother' | 'Sibling' | 'Other' | 'Dependant';
@@ -85,6 +107,7 @@ export interface FamilyMember {
 export interface FamilyRecord {
   id: string;
   sys_id?: string;
+  serviceNowSysId?: string;
   bridge360Id: string;
   applicationId: string;
   familyId?: string;
@@ -257,6 +280,7 @@ export interface CountryDocumentRecord {
   documentName: string;
   localName?: string;
   documentCategory: 'identity' | 'family_relationship' | 'civil_status' | 'address' | 'supporting';
+  registrationScope?: 'individual' | 'family' | 'both';
   issuingAuthorityDesc?: string;
   securityFeatures?: string;
   typicalFields?: string;
@@ -270,7 +294,7 @@ export interface CountryDocumentFieldRecord {
   id: string;
   countryDocumentId: string;
   fieldName: string;
-  fieldType: 'text' | 'date' | 'image';
+  fieldType: 'text' | 'date' | 'image' | 'json';
   active: boolean;
   notes?: string;
 }

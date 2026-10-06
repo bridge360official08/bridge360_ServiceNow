@@ -16,11 +16,22 @@ import {
   AlertCircle,
   UserPlus,
   Edit3,
-  Search
+  Search,
+  Plus,
+  X,
+  UserCheck
 } from 'lucide-react';
 import { SearchableSelect, SearchableOption } from '../common/SearchableSelect';
 import { useBridge360 } from '../../store/Bridge360Context';
-import { DocumentRecord, FamilyMember, CountryRecord, CountryDocumentRecord, CountryDocumentFieldRecord } from '../../types/bridge360';
+import {
+  DocumentRecord,
+  FamilyMember,
+  CountryRecord,
+  CountryDocumentRecord,
+  CountryDocumentFieldRecord,
+  ExtractedFamilyMemberData,
+  ApplicantMatchStatus
+} from '../../types/bridge360';
 import { confidenceStatus, extractDocumentFields, ExtractionResult } from '../../services/ocrEngine';
 import { snExtractDocument } from '../../services/snApi';
 import { evidenceFoundationService } from '../../services/evidenceFoundationService';
@@ -90,6 +101,46 @@ export function normalizeToISODate(dateStr?: string): string {
   return trimmed;
 }
 
+export function computeApplicantMatchStatus(
+  member: ExtractedFamilyMemberData,
+  head: Partial<FamilyMember>
+): ApplicantMatchStatus {
+  const memberName = (member.name || `${member.firstName || ''} ${member.lastName || ''}`).trim().toLowerCase();
+  const hFirst = (head.firstName || '').trim().toLowerCase();
+  const hLast = (head.lastName || '').trim().toLowerCase();
+  const hFull = `${hFirst} ${hLast}`.trim();
+
+  // If head details have not been entered yet, check relationship hint
+  if (!hFirst && !hLast) {
+    const rel = (member.relationshipToHead || '').toLowerCase();
+    if (rel === 'head' || rel === 'self') return 'POSSIBLE MATCH';
+    return 'NEEDS REVIEW';
+  }
+
+  // Exact match on full name
+  if (hFull && (memberName === hFull || memberName.includes(hFull))) {
+    return 'MATCH';
+  }
+
+  // Match both first and last name
+  if (hFirst && hLast && memberName.includes(hFirst) && memberName.includes(hLast)) {
+    return 'MATCH';
+  }
+
+  // Partial match on first or last name
+  if ((hFirst && memberName.includes(hFirst)) || (hLast && memberName.includes(hLast))) {
+    return 'POSSIBLE MATCH';
+  }
+
+  // Head relation with any name overlap
+  const rel = (member.relationshipToHead || '').toLowerCase();
+  if (rel === 'head' || rel === 'self') {
+    return 'POSSIBLE MATCH';
+  }
+
+  return 'NO MATCH';
+}
+
 import { useAssistant } from '../../store/AssistantContext';
 
 export const RegistrationEngine: React.FC<Props> = ({ mode = 'customer', onCompleteTrack }) => {
@@ -108,6 +159,32 @@ export const RegistrationEngine: React.FC<Props> = ({ mode = 'customer', onCompl
   const [selectedCountryId, setSelectedCountryId] = useState<string>('');
   const [selectedCountryDocId, setSelectedCountryDocId] = useState<string>('');
   const [configuredDocumentFields, setConfiguredDocumentFields] = useState<CountryDocumentFieldRecord[]>([]);
+
+  // Registration Mode: 'individual' | 'family' | null
+  const [registrationMode, setRegistrationMode] = useState<'individual' | 'family' | null>(null);
+  const [hasNoFamilyDoc, setHasNoFamilyDoc] = useState<boolean>(false);
+  const [isLoadingDocs, setIsLoadingDocs] = useState<boolean>(false);
+
+  // Phase 4: Family Members state for Review / Edit / Add / Remove / Applicant Identification
+  const [extractedFamilyMembers, setExtractedFamilyMembers] = useState<ExtractedFamilyMemberData[]>([]);
+  const [selectedApplicantMemberId, setSelectedApplicantMemberId] = useState<string>('');
+  const [memberDocTypes, setMemberDocTypes] = useState<Record<string, string>>({});
+  const [editingMember, setEditingMember] = useState<ExtractedFamilyMemberData | null>(null);
+  const [isAddMemberModalOpen, setIsAddMemberModalOpen] = useState<boolean>(false);
+  const [memberFormState, setMemberFormState] = useState<{
+    id?: string;
+    name: string;
+    relationshipToHead: string;
+    dateOfBirth: string;
+    gender: string;
+    memberIdentifier: string;
+  }>({
+    name: '',
+    relationshipToHead: 'Spouse',
+    dateOfBirth: '',
+    gender: 'Female',
+    memberIdentifier: '',
+  });
 
   React.useEffect(() => {
     let isMounted = true;
@@ -140,10 +217,37 @@ export const RegistrationEngine: React.FC<Props> = ({ mode = 'customer', onCompl
     setSelectedDocType('' as any);
     setSelectedCountryDocId('');
     setConfiguredDocumentFields([]);
+    setHasNoFamilyDoc(false);
+    setExtractedFamilyMembers([]);
+    setSelectedApplicantMemberId('');
+    setEditingMember(null);
+    setIsAddMemberModalOpen(false);
 
     if (newCountryId) {
+      setIsLoadingDocs(true);
       try {
-        const specificDocs = await evidenceFoundationService.getCountryDocuments(newCountryId);
+        const scope = registrationMode === 'family' ? 'family' : 'individual';
+        const specificDocs = await evidenceFoundationService.getCountryDocuments(newCountryId, scope);
+
+        if (registrationMode === 'family') {
+          if (!specificDocs || specificDocs.length === 0) {
+            setHasNoFamilyDoc(true);
+          } else {
+            setHasNoFamilyDoc(false);
+            if (specificDocs.length === 1) {
+              const docRec = specificDocs[0];
+              setSelectedDocType(docRec.documentName);
+              setSelectedCountryDocId(docRec.id);
+              try {
+                const fields = await evidenceFoundationService.getCountryDocumentFields(docRec.id);
+                setConfiguredDocumentFields(fields || []);
+              } catch (fErr) {
+                console.warn('Error loading dynamic family document fields:', fErr);
+              }
+            }
+          }
+        }
+
         if (specificDocs && specificDocs.length > 0) {
           setAvailableDocuments(prev => {
             const map = new Map<string, CountryDocumentRecord>();
@@ -154,6 +258,11 @@ export const RegistrationEngine: React.FC<Props> = ({ mode = 'customer', onCompl
         }
       } catch (err) {
         console.warn('Error fetching specific country documents:', err);
+        if (registrationMode === 'family') {
+          setHasNoFamilyDoc(true);
+        }
+      } finally {
+        setIsLoadingDocs(false);
       }
     }
   };
@@ -185,16 +294,24 @@ export const RegistrationEngine: React.FC<Props> = ({ mode = 'customer', onCompl
   const countryDocumentsForSelected = React.useMemo(() => {
     if (!selectedCountry) return [];
     const filtered = availableDocuments.filter(doc => {
+      let matchesCountry = false;
       if (doc.countryId) {
-        if (doc.countryId === selectedCountry.id) return true;
-        if (selectedCountry.iso2 && doc.countryId.toUpperCase() === selectedCountry.iso2.toUpperCase()) return true;
-        if (selectedCountry.iso3 && doc.countryId.toUpperCase() === selectedCountry.iso3.toUpperCase()) return true;
-        if (doc.countryId.toLowerCase() === selectedCountry.countryName.toLowerCase()) return true;
+        if (doc.countryId === selectedCountry.id) matchesCountry = true;
+        if (selectedCountry.iso2 && doc.countryId.toUpperCase() === selectedCountry.iso2.toUpperCase()) matchesCountry = true;
+        if (selectedCountry.iso3 && doc.countryId.toUpperCase() === selectedCountry.iso3.toUpperCase()) matchesCountry = true;
+        if (doc.countryId.toLowerCase() === selectedCountry.countryName.toLowerCase()) matchesCountry = true;
       }
-      if (doc.countryName && selectedCountry.countryName) {
-        if (doc.countryName.toLowerCase() === selectedCountry.countryName.toLowerCase()) return true;
+      if (!matchesCountry && doc.countryName && selectedCountry.countryName) {
+        if (doc.countryName.toLowerCase() === selectedCountry.countryName.toLowerCase()) matchesCountry = true;
       }
-      return false;
+      if (!matchesCountry) return false;
+
+      if (registrationMode === 'family') {
+        return doc.registrationScope === 'family' || doc.registrationScope === 'both';
+      } else if (registrationMode === 'individual') {
+        return !doc.registrationScope || doc.registrationScope === 'individual' || doc.registrationScope === 'both';
+      }
+      return true;
     });
 
     const seen = new Set<string>();
@@ -204,7 +321,7 @@ export const RegistrationEngine: React.FC<Props> = ({ mode = 'customer', onCompl
       seen.add(key);
       return true;
     });
-  }, [selectedCountry, availableDocuments]);
+  }, [selectedCountry, availableDocuments, registrationMode]);
 
   const sortedCountries = React.useMemo(() => {
     const list = [...availableCountries];
@@ -225,7 +342,7 @@ export const RegistrationEngine: React.FC<Props> = ({ mode = 'customer', onCompl
     return countryDocumentsForSelected.map(doc => ({
       value: doc.id,
       label: doc.documentName,
-      badge: (doc as any).documentCode || undefined,
+      badge: (doc as any).documentCode || (doc.registrationScope === 'family' ? 'Family Proof' : undefined),
     }));
   }, [countryDocumentsForSelected]);
 
@@ -516,6 +633,19 @@ export const RegistrationEngine: React.FC<Props> = ({ mode = 'customer', onCompl
         ]),
       ));
 
+      // Phase 4: Process extracted repeated family members if registrationMode is 'family'
+      let initialMembers: ExtractedFamilyMemberData[] = [];
+      if (registrationMode === 'family') {
+        initialMembers = localResult?.familyMembers || [];
+        setExtractedFamilyMembers(initialMembers);
+        if (initialMembers.length > 0) {
+          const headMem = initialMembers.find(m => m.relationshipToHead?.toLowerCase() === 'head' || m.relationshipToHead?.toLowerCase() === 'self');
+          setSelectedApplicantMemberId(headMem ? headMem.id : initialMembers[0].id);
+        } else {
+          setSelectedApplicantMemberId('');
+        }
+      }
+
       const docId = `DOC-${Date.now()}`;
       const newDoc: DocumentRecord = {
         id: docId,
@@ -542,6 +672,7 @@ export const RegistrationEngine: React.FC<Props> = ({ mode = 'customer', onCompl
         ocrRawText: (snDocIntelResult?.diOcrUsed && snDocIntelResult?.rawText) ? snDocIntelResult.rawText : rawExtracted,
         fileDataUrl: fileDataUrl,
         previewUrl: fileDataUrl,
+        familyMembers: registrationMode === 'family' ? initialMembers : undefined,
       };
 
       try {
@@ -641,6 +772,7 @@ export const RegistrationEngine: React.FC<Props> = ({ mode = 'customer', onCompl
         ...prev,
         familyName: lastName ? `${lastName} Family` : (firstName ? `${firstName} Family` : prev.familyName),
         countryOfOrigin: (selectedCountry ? selectedCountry.countryName : nationality) || prev.countryOfOrigin,
+        householdSize: registrationMode === 'family' && initialMembers.length > 0 ? initialMembers.length : prev.householdSize,
       }));
 
       setProactiveMessage("Perfect! I've dynamically extracted your details from the document. Please review them in Step 2.");
@@ -651,6 +783,176 @@ export const RegistrationEngine: React.FC<Props> = ({ mode = 'customer', onCompl
     } finally {
       setIsExtracting(false);
     }
+  };
+
+  // Phase 4: Family Member Management (Review / Edit / Add / Remove / Applicant Identification)
+  const handleSelectApplicant = (memberId: string) => {
+    setSelectedApplicantMemberId(memberId);
+    const applicant = extractedFamilyMembers.find(m => m.id === memberId);
+    if (applicant) {
+      const nameParts = (applicant.name || '').trim().split(/\s+/);
+      const first = applicant.firstName || (nameParts.length > 0 ? nameParts[0] : '');
+      const last = applicant.lastName || (nameParts.length > 1 ? nameParts[nameParts.length - 1] : '');
+      const middle = applicant.middleName || (nameParts.length > 2 ? nameParts.slice(1, -1).join(' ') : '');
+      setHeadOfFamily(prev => ({
+        ...prev,
+        firstName: first || prev.firstName,
+        middleName: middle || prev.middleName,
+        lastName: last || prev.lastName,
+        gender: (applicant.gender === 'Male' || applicant.gender === 'Female' || applicant.gender === 'Other') ? applicant.gender as any : prev.gender,
+        dateOfBirth: applicant.dateOfBirth ? normalizeToISODate(applicant.dateOfBirth) : prev.dateOfBirth,
+        nationalId: applicant.memberIdentifier || prev.nationalId,
+      }));
+    }
+  };
+
+  const handleStartEditMember = (member: ExtractedFamilyMemberData) => {
+    setEditingMember(member);
+    setMemberFormState({
+      id: member.id,
+      name: member.name || `${member.firstName || ''} ${member.lastName || ''}`.trim(),
+      relationshipToHead: member.relationshipToHead || 'Other',
+      dateOfBirth: member.dateOfBirth || '',
+      gender: member.gender || 'Other',
+      memberIdentifier: member.memberIdentifier || '',
+    });
+  };
+
+  const handleSaveMember = () => {
+    if (!memberFormState.name.trim()) return;
+    const nameParts = memberFormState.name.trim().split(/\s+/);
+    const firstName = nameParts[0] || '';
+    const lastName = nameParts.length > 1 ? nameParts[nameParts.length - 1] : '';
+    const middleName = nameParts.length > 2 ? nameParts.slice(1, -1).join(' ') : '';
+
+    if (editingMember) {
+      setExtractedFamilyMembers(prev => prev.map(m => {
+        if (m.id === editingMember.id) {
+          return {
+            ...m,
+            name: memberFormState.name.trim(),
+            firstName,
+            lastName,
+            middleName,
+            relationshipToHead: memberFormState.relationshipToHead,
+            dateOfBirth: memberFormState.dateOfBirth,
+            gender: memberFormState.gender,
+            memberIdentifier: memberFormState.memberIdentifier,
+            source: m.source ? `${m.source} (User edited)` : 'User edited',
+          };
+        }
+        return m;
+      }));
+      if (selectedApplicantMemberId === editingMember.id) {
+        setHeadOfFamily(prev => ({
+          ...prev,
+          firstName: firstName || prev.firstName,
+          middleName: middleName || prev.middleName,
+          lastName: lastName || prev.lastName,
+          gender: (memberFormState.gender === 'Male' || memberFormState.gender === 'Female' || memberFormState.gender === 'Other') ? memberFormState.gender as any : prev.gender,
+          dateOfBirth: memberFormState.dateOfBirth ? normalizeToISODate(memberFormState.dateOfBirth) : prev.dateOfBirth,
+          nationalId: memberFormState.memberIdentifier || prev.nationalId,
+        }));
+      }
+      setEditingMember(null);
+    } else {
+      const newMember: ExtractedFamilyMemberData = {
+        id: `MEMBER-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        name: memberFormState.name.trim(),
+        firstName,
+        lastName,
+        middleName,
+        relationshipToHead: memberFormState.relationshipToHead,
+        dateOfBirth: memberFormState.dateOfBirth,
+        gender: memberFormState.gender,
+        memberIdentifier: memberFormState.memberIdentifier,
+        confidence: 100,
+        source: 'Manual entry',
+      };
+      setExtractedFamilyMembers(prev => {
+        const next = [...prev, newMember];
+        if (!selectedApplicantMemberId) {
+          setSelectedApplicantMemberId(newMember.id);
+        }
+        return next;
+      });
+      setIsAddMemberModalOpen(false);
+    }
+  };
+
+  const handleRemoveMember = (memberId: string) => {
+    setExtractedFamilyMembers(prev => {
+      const remaining = prev.filter(m => m.id !== memberId);
+      if (selectedApplicantMemberId === memberId) {
+        if (remaining.length > 0) {
+          setSelectedApplicantMemberId(remaining[0].id);
+        } else {
+          setSelectedApplicantMemberId('');
+        }
+      }
+      return remaining;
+    });
+  };
+
+  const openAddMemberModal = () => {
+    setEditingMember(null);
+    setMemberFormState({
+      name: '',
+      relationshipToHead: 'Son',
+      dateOfBirth: '',
+      gender: 'Male',
+      memberIdentifier: '',
+    });
+    setIsAddMemberModalOpen(true);
+  };
+
+  const handleContinueFromStep1 = () => {
+    if (registrationMode === 'family' && extractedFamilyMembers.length > 0) {
+      const applicant = extractedFamilyMembers.find(m => m.id === selectedApplicantMemberId) || extractedFamilyMembers[0];
+      const nameParts = (applicant.name || '').trim().split(/\s+/);
+      const first = applicant.firstName || (nameParts.length > 0 ? nameParts[0] : '');
+      const last = applicant.lastName || (nameParts.length > 1 ? nameParts[nameParts.length - 1] : '');
+      const middle = applicant.middleName || (nameParts.length > 2 ? nameParts.slice(1, -1).join(' ') : '');
+
+      setHeadOfFamily(prev => ({
+        ...prev,
+        id: applicant.id,
+        firstName: first || prev.firstName,
+        middleName: middle || prev.middleName,
+        lastName: last || prev.lastName,
+        gender: (applicant.gender === 'Male' || applicant.gender === 'Female' || applicant.gender === 'Other') ? applicant.gender as any : prev.gender,
+        dateOfBirth: applicant.dateOfBirth ? normalizeToISODate(applicant.dateOfBirth) : prev.dateOfBirth,
+        nationalId: applicant.memberIdentifier || prev.nationalId,
+      }));
+
+      const remainingMembers = extractedFamilyMembers.filter(m => m.id !== applicant.id);
+      const mappedMembers: Partial<FamilyMember>[] = remainingMembers.map(m => {
+        const mParts = (m.name || '').trim().split(/\s+/);
+        const mFirst = m.firstName || (mParts.length > 0 ? mParts[0] : '');
+        const mLast = m.lastName || (mParts.length > 1 ? mParts[mParts.length - 1] : '');
+        const mMid = m.middleName || (mParts.length > 2 ? mParts.slice(1, -1).join(' ') : '');
+        return {
+          id: m.id,
+          relationshipToHead: (m.relationshipToHead || 'Other') as any,
+          firstName: mFirst,
+          middleName: mMid,
+          lastName: mLast,
+          gender: (m.gender === 'Male' || m.gender === 'Female' || m.gender === 'Other') ? m.gender as any : ('' as any),
+          dateOfBirth: m.dateOfBirth ? normalizeToISODate(m.dateOfBirth) : '',
+          nationality: headOfFamily.nationality || familyInfo.countryOfOrigin || '',
+          nationalId: m.memberIdentifier || '',
+        };
+      });
+      setMembers(mappedMembers);
+
+      setFamilyInfo(prev => ({
+        ...prev,
+        householdSize: Math.max(1, extractedFamilyMembers.length),
+        familyName: last ? `${last} Family` : prev.familyName,
+      }));
+    }
+
+    setCurrentStep(2);
   };
 
   // ── Step Validation Handlers ──────────────────────────────────────────────
@@ -873,6 +1175,34 @@ export const RegistrationEngine: React.FC<Props> = ({ mode = 'customer', onCompl
     reader.readAsDataURL(file);
   };
 
+  const handleMemberDocUploadCustom = (memberId: string, docType: string, e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files || e.target.files.length === 0) return;
+    const file = e.target.files[0];
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = reader.result as string;
+      const docId = `DOC-${Date.now()}-${Math.random().toString(36).substring(2,6)}`;
+      const newDoc: DocumentRecord = {
+        id: docId,
+        applicationId: '',
+        familyId: '',
+        memberId: memberId,
+        documentType: docType || 'Identity Document',
+        fileName: file.name,
+        fileSize: `${(file.size / (1024 * 1024)).toFixed(2)} MB`,
+        uploadedAt: new Date().toLocaleTimeString(),
+        verificationStatus: 'Pending',
+        extractedFields: [],
+        fileDataUrl: dataUrl,
+        previewUrl: dataUrl,
+      };
+      try { localStorage.setItem(`bridge360_doc_preview_${docId}`, dataUrl); } catch (err) {}
+      setUploadedDocs(prev => [...prev, newDoc]);
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
   const removeDoc = (id: string) => {
     setUploadedDocs(prev => prev.filter(d => d.id !== id));
   };
@@ -888,6 +1218,8 @@ export const RegistrationEngine: React.FC<Props> = ({ mode = 'customer', onCompl
         headOfFamily,
         familyInfo,
         members,
+        familyMembers: registrationMode === 'family' ? extractedFamilyMembers : undefined,
+        selectedApplicantMemberId: registrationMode === 'family' ? selectedApplicantMemberId : undefined,
         emergencyContact,
         uploadedDocs,
       });
@@ -905,7 +1237,12 @@ export const RegistrationEngine: React.FC<Props> = ({ mode = 'customer', onCompl
   };
 
   const steps = [
-    { num: 1, name: t('reg.step1', 'Upload Document') },
+    {
+      num: 1,
+      name: registrationMode === 'family'
+        ? t('reg.step1.familyProof', 'Upload Family Registration Document')
+        : t('reg.step1', 'Upload Document')
+    },
     { num: 2, name: t('reg.step2', 'Head of Family') },
     { num: 3, name: t('reg.step3', 'Family Info') },
     ...(familyInfo.householdSize > 1 ? [{ num: 4, name: t('reg.step4', 'Family Members') }] : []),
@@ -917,7 +1254,13 @@ export const RegistrationEngine: React.FC<Props> = ({ mode = 'customer', onCompl
   return (
     <div style={{ maxWidth: '1050px', margin: '0 auto', padding: '24px 16px' }}>
       {/* Humanitarian Refugee Header Banner */}
-      <div className="humanitarian-banner" style={{ marginBottom: '28px' }}>
+      <div className="humanitarian-banner" style={{ 
+        marginBottom: '28px',
+        background: 'linear-gradient(135deg, #0F172A 0%, #1E3A8A 100%)',
+        padding: '32px 36px',
+        borderRadius: '20px',
+        boxShadow: '0 20px 40px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)'
+      }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '10px' }}>
           <div style={{ padding: '8px 12px', background: 'rgba(37, 99, 235, 0.3)', borderRadius: '20px', fontSize: '0.8rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '6px' }}>
             <Sparkles size={16} /> {t('banner.secureReading', 'Secure Automated Reading')}
@@ -934,47 +1277,227 @@ export const RegistrationEngine: React.FC<Props> = ({ mode = 'customer', onCompl
         </p>
       </div>
 
-      {/* Stepper Navigation Bar */}
-      <div className="stepper-container" style={{ margin: '0 10px 36px 10px', direction: 'ltr' }}>
-        <div className="stepper-line">
-          <div
-            className="stepper-line-progress"
-            style={{
-              width: `${((Math.min(currentStep, 7) - 1) / (steps.length - 1)) * 100}%`,
-            }}
-          />
-        </div>
-        {steps.map(s => (
-          <div
-            key={s.num}
-            className={`step-item ${currentStep === s.num ? 'active' : ''} ${currentStep > s.num ? 'completed' : ''}`}
-            onClick={() => s.num < currentStep && setCurrentStep(s.num)}
-          >
-            <div className="step-circle">{currentStep > s.num ? <Check size={18} /> : s.num}</div>
-            <span className="step-label">{s.name}</span>
-          </div>
-        ))}
-      </div>
-
-      {/* STEP 1: UPLOAD INITIAL DOCUMENT FOR DOCINTEL EXTRACTION OR MANUAL FILL */}
-      {currentStep === 1 && (
-        <div className="glass-card card-accent-blue animate-fade-in" style={{ padding: '36px' }}>
-          <div style={{ textAlign: 'center', maxWidth: '640px', margin: '0 auto 28px auto' }}>
-            <div style={{ width: '64px', height: '64px', borderRadius: '18px', background: '#EFF6FF', color: '#2563EB', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px auto', border: '1px solid #BFDBFE' }}>
-              <UploadCloud size={34} />
+      {/* REGISTRATION MODE SELECTION SCREEN (Phase 3) */}
+      {registrationMode === null && (
+        <div className="glass-card card-accent-blue animate-fade-in" style={{ padding: '44px 32px', textAlign: 'center' }}>
+          <div style={{ maxWidth: '640px', margin: '0 auto 36px auto' }}>
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', background: 'rgba(37, 99, 235, 0.1)', color: '#2563EB', padding: '6px 16px', borderRadius: '20px', fontSize: '0.82rem', fontWeight: 700, marginBottom: '14px' }}>
+              <Sparkles size={16} /> Choose Registration Pathway
             </div>
-            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', background: 'rgba(37, 99, 235, 0.1)', color: '#2563EB', padding: '4px 12px', borderRadius: '20px', fontSize: '0.78rem', fontWeight: 700, marginBottom: '8px' }}>
-              <Sparkles size={14} /> {t('reg.step1.title', 'Instant Document Verification & Auto-Fill')}
-            </div>
-            <h3 style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--text-main)', marginBottom: '8px' }}>
-              {t('reg.step1', 'Step 1 — Upload Identification Document')}
-            </h3>
-            <p style={{ color: 'var(--text-sub)', fontSize: '0.92rem', marginTop: '6px', lineHeight: 1.5 }}>
-              {t('reg.step1.subtitle', 'Upload an identity document to extract details. High-confidence fields may be prefilled; review every extracted value before submitting.')}
+            <h2 style={{ fontSize: '2rem', fontWeight: 800, color: 'var(--text-main)', marginBottom: '10px' }}>
+              How would you like to register?
+            </h2>
+            <p style={{ color: 'var(--text-sub)', fontSize: '0.98rem', lineHeight: 1.6 }}>
+              Select whether you are registering as a single individual or enrolling an entire household with an official family registration document.
             </p>
           </div>
 
-          <div style={{ maxWidth: '560px', margin: '0 auto' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '24px', maxWidth: '860px', margin: '0 auto' }}>
+            {/* 1. Individual Registration Card */}
+            <div
+              id="registration-mode-individual-card"
+              onClick={() => {
+                setRegistrationMode('individual');
+                setCurrentStep(1);
+              }}
+              className="registration-mode-card"
+              style={{
+                padding: '32px 26px',
+                borderRadius: '16px',
+                border: '2px solid #E2E8F0',
+                background: '#FFFFFF',
+                cursor: 'pointer',
+                textAlign: 'left',
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'space-between',
+                boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05)',
+              }}
+            >
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px' }}>
+                  <div style={{ width: '56px', height: '56px', borderRadius: '14px', background: '#EFF6FF', color: '#2563EB', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid #BFDBFE' }}>
+                    <User size={30} />
+                  </div>
+                  <span style={{ fontSize: '0.75rem', fontWeight: 700, background: '#F1F5F9', color: '#475569', padding: '4px 12px', borderRadius: '12px' }}>
+                    Individual Mode
+                  </span>
+                </div>
+                <h3 style={{ fontSize: '1.3rem', fontWeight: 800, color: 'var(--text-main)', marginBottom: '8px' }}>
+                  Individual Registration
+                </h3>
+                <p style={{ color: 'var(--text-sub)', fontSize: '0.92rem', lineHeight: 1.5, marginBottom: '20px' }}>
+                  Register one person using an individual identity document.
+                </p>
+                <div style={{ fontSize: '0.82rem', color: '#64748B', display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '24px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <CheckCircle size={15} style={{ color: '#10B981' }} /> Passports, National IDs, Asylum Certificates
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <CheckCircle size={15} style={{ color: '#10B981' }} /> Single applicant identity verification
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <CheckCircle size={15} style={{ color: '#10B981' }} /> Standard individual intake workflow
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                id="btn-choose-individual-registration"
+                className="btn-primary"
+                style={{ width: '100%', justifyContent: 'center', padding: '13px', fontSize: '0.94rem' }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setRegistrationMode('individual');
+                  setCurrentStep(1);
+                }}
+              >
+                Individual Registration <ArrowRight size={16} />
+              </button>
+            </div>
+
+            {/* 2. Family Registration Card */}
+            <div
+              id="registration-mode-family-card"
+              onClick={() => {
+                setRegistrationMode('family');
+                setCurrentStep(1);
+              }}
+              className="registration-mode-card"
+              style={{
+                padding: '32px 26px',
+                borderRadius: '16px',
+                border: '2px solid #93C5FD',
+                background: '#F0F9FF',
+                cursor: 'pointer',
+                textAlign: 'left',
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'space-between',
+                boxShadow: '0 4px 14px rgba(37, 99, 235, 0.08)',
+              }}
+            >
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px' }}>
+                  <div style={{ width: '56px', height: '56px', borderRadius: '14px', background: '#DBEAFE', color: '#1D4ED8', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid #93C5FD' }}>
+                    <Users size={30} />
+                  </div>
+                  <span style={{ fontSize: '0.75rem', fontWeight: 700, background: '#DBEAFE', color: '#1E40AF', padding: '4px 12px', borderRadius: '12px' }}>
+                    Household Mode
+                  </span>
+                </div>
+                <h3 style={{ fontSize: '1.3rem', fontWeight: 800, color: 'var(--text-main)', marginBottom: '8px' }}>
+                  Family Registration
+                </h3>
+                <p style={{ color: 'var(--text-sub)', fontSize: '0.92rem', lineHeight: 1.5, marginBottom: '20px' }}>
+                  Register an entire household using a country-specific family registration document.
+                </p>
+                <div style={{ fontSize: '0.82rem', color: '#1E40AF', display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '24px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <CheckCircle size={15} style={{ color: '#2563EB' }} /> Family Card, Household Register, Ration Card
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <CheckCircle size={15} style={{ color: '#2563EB' }} /> Whole household multi-member enrollment
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <CheckCircle size={15} style={{ color: '#2563EB' }} /> Driven by ServiceNow civil registry catalog
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                id="btn-choose-family-registration"
+                className="btn-primary"
+                style={{ width: '100%', justifyContent: 'center', padding: '13px', fontSize: '0.94rem', background: '#1D4ED8', borderColor: '#1E40AF' }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setRegistrationMode('family');
+                  setCurrentStep(1);
+                }}
+              >
+                Family Registration <ArrowRight size={16} />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Stepper Navigation Bar (Visible when mode is selected) */}
+      {registrationMode !== null && (
+        <div className="stepper-container" style={{ margin: '0 10px 36px 10px', direction: 'ltr' }}>
+          <div className="stepper-line">
+            <div
+              className="stepper-line-progress"
+              style={{
+                width: `${((Math.min(currentStep, 7) - 1) / (steps.length - 1)) * 100}%`,
+              }}
+            />
+          </div>
+          {steps.map(s => (
+            <div
+              key={s.num}
+              className={`step-item ${currentStep === s.num ? 'active' : ''} ${currentStep > s.num ? 'completed' : ''}`}
+              onClick={() => s.num < currentStep && setCurrentStep(s.num)}
+            >
+              <div className="step-circle">{currentStep > s.num ? <Check size={18} /> : s.num}</div>
+              <span className="step-label">{s.name}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* STEP 1: UPLOAD INITIAL DOCUMENT (Individual or Family) */}
+      {registrationMode !== null && currentStep === 1 && (
+        <div className="glass-card card-accent-blue animate-fade-in" style={{ padding: '36px' }}>
+          {/* Mode Switcher / Breadcrumb */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '22px' }}>
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ fontSize: '0.8rem', fontWeight: 700, color: registrationMode === 'family' ? '#1E40AF' : '#0369A1', background: registrationMode === 'family' ? '#EFF6FF' : '#F0F9FF', border: `1px solid ${registrationMode === 'family' ? '#BFDBFE' : '#BAE6FD'}`, padding: '4px 12px', borderRadius: '14px', display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                {registrationMode === 'family' ? <Users size={14} /> : <User size={14} />}
+                Registration Mode: <strong>{registrationMode === 'family' ? 'Family Registration' : 'Individual Registration'}</strong>
+              </span>
+            </div>
+            <button
+              type="button"
+              id="btn-change-registration-mode"
+              onClick={() => {
+                setRegistrationMode(null);
+                setSelectedCountryId('');
+                setSelectedDocType('' as any);
+                setSelectedCountryDocId('');
+                setConfiguredDocumentFields([]);
+                setHasNoFamilyDoc(false);
+                setExtractedFamilyMembers([]);
+                setSelectedApplicantMemberId('');
+                setEditingMember(null);
+                setIsAddMemberModalOpen(false);
+              }}
+              style={{ background: 'none', border: 'none', color: '#2563EB', fontSize: '0.82rem', fontWeight: 600, cursor: 'pointer', textDecoration: 'underline', padding: 0 }}
+            >
+              ← Change Registration Mode
+            </button>
+          </div>
+
+          <div style={{ textAlign: 'center', maxWidth: '640px', margin: '0 auto 28px auto' }}>
+            <div style={{ width: '64px', height: '64px', borderRadius: '18px', background: '#EFF6FF', color: '#2563EB', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px auto', border: '1px solid #BFDBFE' }}>
+              {registrationMode === 'family' ? <Users size={34} /> : <UploadCloud size={34} />}
+            </div>
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', background: 'rgba(37, 99, 235, 0.1)', color: '#2563EB', padding: '4px 12px', borderRadius: '20px', fontSize: '0.78rem', fontWeight: 700, marginBottom: '8px' }}>
+              <Sparkles size={14} /> {registrationMode === 'family' ? 'Family Registration Document Ingestion' : t('reg.step1.title', 'Instant Document Verification & Auto-Fill')}
+            </div>
+            <h3 style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--text-main)', marginBottom: '8px' }}>
+              {registrationMode === 'family'
+                ? 'Step 1 — Upload Family Registration Document'
+                : t('reg.step1', 'Step 1 — Upload Identification Document')}
+            </h3>
+            <p style={{ color: 'var(--text-sub)', fontSize: '0.92rem', marginTop: '6px', lineHeight: 1.5 }}>
+              {registrationMode === 'family'
+                ? 'Select your country of origin and family registration document (e.g. Family Card, Household Register, Ration Card). High-confidence fields will be safely read to configure your household application.'
+                : t('reg.step1.subtitle', 'Upload an identity document to extract details. High-confidence fields may be prefilled; review every extracted value before submitting.')}
+            </p>
+          </div>
+
+          <div style={{ maxWidth: registrationMode === 'family' ? '780px' : '560px', margin: '0 auto', transition: 'max-width 0.2s ease' }}>
             {/* Country Dropdown with Search */}
             <div style={{ marginBottom: '16px' }}>
               <SearchableSelect
@@ -988,56 +1511,98 @@ export const RegistrationEngine: React.FC<Props> = ({ mode = 'customer', onCompl
               />
             </div>
 
-            {/* Document Type Dropdown with Search */}
-            <div style={{ marginBottom: '16px' }}>
-              <SearchableSelect
-                id="registration-doc-type-select"
-                label={t('reg.step1.docTypeLabel', 'Select Document Type')}
-                placeholder={!selectedCountryId ? t('reg.step1.selectCountryFirst', 'Select country first') : t('reg.step1.selectDocPlaceholder', '-- Select or Search Document Type --')}
-                searchPlaceholder="Search document type..."
-                options={documentOptions}
-                value={selectedCountryDocId || selectedDocType}
-                onChange={handleDocTypeSelectChange}
-                disabled={!selectedCountryId}
-              />
-              {configuredDocumentFields.length > 0 && (
-                <div style={{ fontSize: '0.78rem', color: '#2563EB', marginTop: '6px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '5px' }}>
-                  <CheckCircle size={14} /> {configuredDocumentFields.length} active fields configured for this document in ServiceNow
+            {/* If Family Mode and Country has NO family document: Section 5 Case */}
+            {registrationMode === 'family' && selectedCountryId && hasNoFamilyDoc && !isLoadingDocs && (
+              <div id="no-family-document-alert" style={{ margin: '20px 0', padding: '20px', background: '#FFFBEB', border: '1px solid #FCD34D', borderRadius: '12px' }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '14px' }}>
+                  <AlertCircle size={24} style={{ color: '#D97706', flexShrink: 0, marginTop: '2px' }} />
+                  <div style={{ flex: 1 }}>
+                    <h4 style={{ margin: '0 0 6px 0', fontSize: '1rem', fontWeight: 800, color: '#92400E' }}>
+                      Family registration is not currently available for this country.
+                    </h4>
+                    <p style={{ margin: '0 0 14px 0', fontSize: '0.86rem', color: '#B45309', lineHeight: 1.5 }}>
+                      No official family registration document has been registered in the ServiceNow catalog for {selectedCountry?.countryName || 'the selected country'}. You may still register using an individual identity document.
+                    </p>
+                    <button
+                      type="button"
+                      id="btn-return-to-individual-registration"
+                      className="btn-primary"
+                      style={{ fontSize: '0.86rem', padding: '9px 20px', background: '#D97706', borderColor: '#B45309', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                      onClick={() => {
+                        setRegistrationMode('individual');
+                        setHasNoFamilyDoc(false);
+                        handleStep1CountryChange(selectedCountryId);
+                      }}
+                    >
+                      <User size={16} /> Return to Individual Registration
+                    </button>
+                  </div>
                 </div>
-              )}
-            </div>
+              </div>
+            )}
 
-            <div
-              style={{
-                border: '2px dashed #2563EB',
-                borderRadius: '12px',
-                padding: '36px 20px',
-                textAlign: 'center',
-                background: isExtracting ? '#EFF6FF' : '#F8FAFC',
-                cursor: 'pointer',
-                position: 'relative',
-                transition: 'all 0.2s ease',
-              }}
-            >
-              <input
-                type="file"
-                onChange={handleInitialDocUpload}
-                style={{ position: 'absolute', inset: 0, opacity: 0, cursor: 'pointer' }}
-              />
-              <UploadCloud size={38} style={{ color: '#2563EB', marginBottom: '10px' }} />
-              <div style={{ fontSize: '1.05rem', fontWeight: 800, color: 'var(--text-main)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
-                {isExtracting ? (
-                  <>
-                    <Loader2 size={20} className="animate-spin" /> Verifying and Reading Document...
-                  </>
-                ) : (
-                  t('reg.step1.dragDrop', 'Click to Choose Document File or Drag & Drop')
+            {/* Document Type Dropdown (Only when family document is available or in individual mode) */}
+            {(!hasNoFamilyDoc || registrationMode === 'individual') && (
+              <div style={{ marginBottom: '16px' }}>
+                <SearchableSelect
+                  id="registration-doc-type-select"
+                  label={registrationMode === 'family' ? 'Select Family Registration Document' : t('reg.step1.docTypeLabel', 'Select Document Type')}
+                  placeholder={!selectedCountryId ? t('reg.step1.selectCountryFirst', 'Select country first') : t('reg.step1.selectDocPlaceholder', '-- Select or Search Document Type --')}
+                  searchPlaceholder={registrationMode === 'family' ? 'Search family document (e.g. Ration Card, Family Card, Household Register)...' : 'Search document type...'}
+                  options={documentOptions}
+                  value={selectedCountryDocId || selectedDocType}
+                  onChange={handleDocTypeSelectChange}
+                  disabled={!selectedCountryId || isLoadingDocs}
+                />
+                {configuredDocumentFields.length > 0 && (
+                  <div style={{ fontSize: '0.78rem', color: '#2563EB', marginTop: '6px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '5px' }}>
+                    <CheckCircle size={14} /> {configuredDocumentFields.length} active fields configured for this document in ServiceNow
+                  </div>
                 )}
               </div>
-              <div style={{ fontSize: '0.8rem', color: 'var(--text-sub)', marginTop: '4px' }}>
-                {t('reg.step1.supports', 'Supports PDF, JPG, PNG, WEBP (Passports, UNHCR IDs, National IDs)')}
+            )}
+
+            {/* Document Upload Zone */}
+            {(!hasNoFamilyDoc || registrationMode === 'individual') && (
+              <div
+                id="registration-upload-zone"
+                style={{
+                  border: '2px dashed #2563EB',
+                  borderRadius: '12px',
+                  padding: '36px 20px',
+                  textAlign: 'center',
+                  background: isExtracting ? '#EFF6FF' : '#F8FAFC',
+                  cursor: 'pointer',
+                  position: 'relative',
+                  transition: 'all 0.2s ease',
+                }}
+              >
+                <input
+                  type="file"
+                  id="registration-file-input"
+                  onChange={handleInitialDocUpload}
+                  style={{ position: 'absolute', inset: 0, opacity: 0, cursor: 'pointer' }}
+                />
+                <UploadCloud size={38} style={{ color: '#2563EB', marginBottom: '10px' }} />
+                <div style={{ fontSize: '1.05rem', fontWeight: 800, color: 'var(--text-main)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+                  {isExtracting ? (
+                    <>
+                      <Loader2 size={20} className="animate-spin" /> Verifying and Reading Document...
+                    </>
+                  ) : (
+                    registrationMode === 'family'
+                      ? 'Upload Family Registration Document'
+                      : t('reg.step1.dragDrop', 'Click to Choose Document File or Drag & Drop')
+                  )}
+                </div>
+                <div style={{ fontSize: '0.8rem', color: 'var(--text-sub)', marginTop: '4px' }}>
+                  {registrationMode === 'family'
+                    ? 'Supports PDF, JPG, PNG, WEBP (Household Register, Family Card, Ration Card)'
+                    : t('reg.step1.supports', 'Supports PDF, JPG, PNG, WEBP (Passports, UNHCR IDs, National IDs)')
+                  }
+                </div>
               </div>
-            </div>
+            )}
 
             {/* Uploaded File Pill */}
             {uploadedDocs.length > 0 && !isExtracting && (
@@ -1101,13 +1666,405 @@ export const RegistrationEngine: React.FC<Props> = ({ mode = 'customer', onCompl
               </div>
             )}
 
+            {/* PHASE 4: FAMILY MEMBER REVIEW / EDIT / ADD / REMOVE / APPLICANT IDENTIFICATION */}
+            {registrationMode === 'family' && uploadedDocs.length > 0 && !isExtracting && (
+              <div
+                id="family-members-review-section"
+                style={{
+                  marginTop: '24px',
+                  padding: '24px',
+                  background: '#F8FAFC',
+                  borderRadius: '14px',
+                  border: '1px solid #BFDBFE',
+                  boxShadow: '0 2px 8px rgba(37, 99, 235, 0.05)',
+                }}
+              >
+                {/* Header row */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
+                  <div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <div style={{ width: '32px', height: '32px', borderRadius: '8px', background: '#DBEAFE', color: '#1D4ED8', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <Users size={18} />
+                      </div>
+                      <h4 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 800, color: '#0F172A' }}>
+                        Family Members Found: {extractedFamilyMembers.length}
+                      </h4>
+                    </div>
+                    <p style={{ margin: '4px 0 0 0', fontSize: '0.82rem', color: '#64748B' }}>
+                      Extracted from {selectedDocType || 'family registration document'}. Review each person, identify which member is you (the applicant), or add missing members.
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    id="btn-add-family-member"
+                    className="btn-secondary"
+                    style={{
+                      fontSize: '0.84rem',
+                      padding: '8px 16px',
+                      background: '#FFFFFF',
+                      borderColor: '#2563EB',
+                      color: '#2563EB',
+                      fontWeight: 700,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      boxShadow: '0 1px 2px rgba(37,99,235,0.08)',
+                    }}
+                    onClick={openAddMemberModal}
+                  >
+                    <Plus size={15} /> + Add Family Member
+                  </button>
+                </div>
+
+                {/* If no members extracted: Helpful error state per requirement 16 */}
+                {extractedFamilyMembers.length === 0 ? (
+                  <div
+                    id="empty-family-members-notice"
+                    style={{
+                      padding: '16px 20px',
+                      background: '#FFFBEB',
+                      border: '1px solid #FCD34D',
+                      borderRadius: '10px',
+                      color: '#92400E',
+                      fontSize: '0.86rem',
+                      display: 'flex',
+                      alignItems: 'flex-start',
+                      gap: '12px',
+                    }}
+                  >
+                    <AlertCircle size={22} style={{ color: '#D97706', flexShrink: 0, marginTop: '2px' }} />
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontWeight: 800, marginBottom: '2px' }}>
+                        Family members could not be automatically identified.
+                      </div>
+                      <div style={{ color: '#B45309', fontSize: '0.82rem', lineHeight: 1.5 }}>
+                        Please review the document and add the family members manually using the "+ Add Family Member" button above.
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    {/* Applicant Identification Prompt Banner per requirement 13 & 14 */}
+                    <div
+                      id="applicant-identification-banner"
+                      style={{
+                        marginBottom: '16px',
+                        padding: '12px 16px',
+                        background: '#EFF6FF',
+                        borderRadius: '10px',
+                        border: '1px solid #BFDBFE',
+                        display: 'flex',
+                        alignItems: 'flex-start',
+                        gap: '10px',
+                      }}
+                    >
+                      <UserCheck size={20} style={{ color: '#1D4ED8', flexShrink: 0, marginTop: '2px' }} />
+                      <div>
+                        <div style={{ fontSize: '0.88rem', fontWeight: 800, color: '#1E40AF' }}>
+                          Which family member are you? (Applicant Identification)
+                        </div>
+                        <div style={{ fontSize: '0.78rem', color: '#3B82F6', marginTop: '2px', lineHeight: 1.4 }}>
+                          Choose the radio button corresponding to your record. This designates who is submitting this registration and populates the primary applicant details.
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Extracted Members List */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                      {extractedFamilyMembers.map((member, idx) => {
+                        const isApplicant = selectedApplicantMemberId === member.id;
+                        const matchStatus = member.matchStatus || computeApplicantMatchStatus(member, headOfFamily);
+                        const matchBadgeColors = matchStatus === 'MATCH'
+                          ? { bg: '#DCFCE7', text: '#166534', border: '#86EFAC' }
+                          : matchStatus === 'POSSIBLE MATCH'
+                            ? { bg: '#FEF9C3', text: '#854D0E', border: '#FDE047' }
+                            : matchStatus === 'NEEDS REVIEW'
+                              ? { bg: '#EFF6FF', text: '#1E40AF', border: '#BFDBFE' }
+                              : { bg: '#F1F5F9', text: '#475569', border: '#CBD5E1' };
+
+                        const confStatus = confidenceStatus(member.confidence || 0);
+                        const confPillColors = confStatus === 'approved'
+                          ? { bg: '#F0FDF4', text: '#166534', border: '#BBF7D0' }
+                          : confStatus === 'pending'
+                            ? { bg: '#FFFBEB', text: '#B45309', border: '#FDE68A' }
+                            : { bg: '#FEF2F2', text: '#991B1B', border: '#FECACA' };
+
+                        return (
+                          <div
+                            key={member.id}
+                            id={`member-row-${member.id}`}
+                            style={{
+                              background: isApplicant ? '#F0FDF4' : '#FFFFFF',
+                              border: isApplicant ? '2px solid #22C55E' : '1px solid #E2E8F0',
+                              borderRadius: '12px',
+                              padding: '16px 18px',
+                              transition: 'all 0.15s ease',
+                              boxShadow: isApplicant ? '0 2px 10px rgba(34, 197, 94, 0.12)' : '0 1px 3px rgba(0,0,0,0.03)',
+                            }}
+                          >
+                            {/* Card Top Bar */}
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px', marginBottom: '10px' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                <label style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', cursor: 'pointer', margin: 0 }}>
+                                  <input
+                                    type="radio"
+                                    name="familyApplicantSelection"
+                                    id={`applicant-radio-${member.id}`}
+                                    checked={isApplicant}
+                                    onChange={() => handleSelectApplicant(member.id)}
+                                    style={{ width: '18px', height: '18px', accentColor: '#16A34A', cursor: 'pointer' }}
+                                  />
+                                  <span style={{ fontSize: '0.98rem', fontWeight: 800, color: '#0F172A' }}>
+                                    {member.name || `${member.firstName || ''} ${member.lastName || ''}`.trim() || `Family Member #${idx + 1}`}
+                                  </span>
+                                </label>
+
+                                {isApplicant && (
+                                  <span style={{ fontSize: '0.72rem', fontWeight: 800, background: '#22C55E', color: '#FFFFFF', padding: '2px 8px', borderRadius: '12px' }}>
+                                    Applicant (You)
+                                  </span>
+                                )}
+
+                                <span
+                                  title={`Registration matching indicator: ${matchStatus}`}
+                                  style={{
+                                    fontSize: '0.7rem',
+                                    fontWeight: 700,
+                                    background: matchBadgeColors.bg,
+                                    color: matchBadgeColors.text,
+                                    border: `1px solid ${matchBadgeColors.border}`,
+                                    padding: '2px 8px',
+                                    borderRadius: '6px',
+                                    textTransform: 'uppercase',
+                                    letterSpacing: '0.04em',
+                                  }}
+                                >
+                                  {matchStatus}
+                                </span>
+                              </div>
+
+                              {/* Member Actions */}
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <button
+                                  type="button"
+                                  id={`btn-edit-member-${member.id}`}
+                                  className="btn-secondary"
+                                  style={{ fontSize: '0.78rem', padding: '4px 10px', background: '#FFFFFF', borderColor: '#CBD5E1', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                                  onClick={() => handleStartEditMember(member)}
+                                >
+                                  <Edit3 size={13} /> Edit
+                                </button>
+                                <button
+                                  type="button"
+                                  id={`btn-remove-member-${member.id}`}
+                                  className="btn-secondary"
+                                  style={{ fontSize: '0.78rem', padding: '4px 10px', background: '#FFFFFF', borderColor: '#FECACA', color: '#DC2626', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                                  onClick={() => handleRemoveMember(member.id)}
+                                >
+                                  <Trash2 size={13} /> Remove
+                                </button>
+                              </div>
+                            </div>
+
+                            {/* Member Details Columns */}
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '10px', background: '#F8FAFC', padding: '10px 14px', borderRadius: '8px', fontSize: '0.82rem' }}>
+                              <div>
+                                <span style={{ color: '#64748B', display: 'block', fontSize: '0.72rem', fontWeight: 600 }}>Relationship</span>
+                                <strong style={{ color: '#1E293B' }}>{member.relationshipToHead || 'Other'}</strong>
+                              </div>
+                              <div>
+                                <span style={{ color: '#64748B', display: 'block', fontSize: '0.72rem', fontWeight: 600 }}>Date of Birth</span>
+                                <strong style={{ color: '#1E293B' }}>{member.dateOfBirth || '—'}</strong>
+                              </div>
+                              <div>
+                                <span style={{ color: '#64748B', display: 'block', fontSize: '0.72rem', fontWeight: 600 }}>Gender</span>
+                                <strong style={{ color: '#1E293B' }}>{member.gender || '—'}</strong>
+                              </div>
+                              {member.memberIdentifier && (
+                                <div>
+                                  <span style={{ color: '#64748B', display: 'block', fontSize: '0.72rem', fontWeight: 600 }}>ID / Identifier</span>
+                                  <strong style={{ color: '#1E293B' }}>{member.memberIdentifier}</strong>
+                                </div>
+                              )}
+                              <div>
+                                <span style={{ color: '#64748B', display: 'block', fontSize: '0.72rem', fontWeight: 600 }}>Confidence</span>
+                                <span style={{
+                                  display: 'inline-block',
+                                  fontSize: '0.72rem',
+                                  fontWeight: 700,
+                                  background: confPillColors.bg,
+                                  color: confPillColors.text,
+                                  border: `1px solid ${confPillColors.border}`,
+                                  padding: '1px 6px',
+                                  borderRadius: '4px',
+                                  marginTop: '2px',
+                                }}>
+                                  {member.confidence ? `${member.confidence}%` : 'Unscored'} ({confStatus === 'approved' ? 'High' : 'Review'})
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+
+            {/* Modal for Edit or Add Member */}
+            {(editingMember !== null || isAddMemberModalOpen) && (
+              <div
+                id="member-edit-modal-overlay"
+                style={{
+                  position: 'fixed',
+                  inset: 0,
+                  background: 'rgba(15, 23, 42, 0.65)',
+                  backdropFilter: 'blur(4px)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  zIndex: 9999,
+                  padding: '16px',
+                }}
+              >
+                <div
+                  className="glass-card animate-scale-up"
+                  style={{
+                    maxWidth: '480px',
+                    width: '100%',
+                    background: '#FFFFFF',
+                    borderRadius: '16px',
+                    padding: '24px',
+                    boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <div style={{ width: '32px', height: '32px', borderRadius: '8px', background: '#EFF6FF', color: '#2563EB', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        {editingMember ? <Edit3 size={18} /> : <UserPlus size={18} />}
+                      </div>
+                      <h4 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 800, color: '#0F172A' }}>
+                        {editingMember ? 'Edit Family Member' : 'Add Family Member'}
+                      </h4>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => { setEditingMember(null); setIsAddMemberModalOpen(false); }}
+                      style={{ background: 'none', border: 'none', color: '#64748B', cursor: 'pointer', padding: '4px' }}
+                    >
+                      <X size={20} />
+                    </button>
+                  </div>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', marginBottom: '22px' }}>
+                    <div>
+                      <label className="input-label">Full Name *</label>
+                      <input
+                        id="input-member-modal-name"
+                        className="input-field"
+                        placeholder="e.g. John Doe"
+                        value={memberFormState.name}
+                        onChange={e => setMemberFormState(prev => ({ ...prev, name: e.target.value }))}
+                        autoFocus
+                      />
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                      <div>
+                        <label className="input-label">Relationship to Head *</label>
+                        <select
+                          id="select-member-modal-relationship"
+                          className="input-field"
+                          value={memberFormState.relationshipToHead}
+                          onChange={e => setMemberFormState(prev => ({ ...prev, relationshipToHead: e.target.value }))}
+                        >
+                          <option value="Head">Head</option>
+                          <option value="Spouse">Spouse</option>
+                          <option value="Son">Son</option>
+                          <option value="Daughter">Daughter</option>
+                          <option value="Father">Father</option>
+                          <option value="Mother">Mother</option>
+                          <option value="Sibling">Sibling</option>
+                          <option value="Dependant">Dependant</option>
+                          <option value="Other">Other</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="input-label">Gender</label>
+                        <select
+                          id="select-member-modal-gender"
+                          className="input-field"
+                          value={memberFormState.gender}
+                          onChange={e => setMemberFormState(prev => ({ ...prev, gender: e.target.value }))}
+                        >
+                          <option value="Male">Male</option>
+                          <option value="Female">Female</option>
+                          <option value="Other">Other</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                      <div>
+                        <label className="input-label">Date of Birth</label>
+                        <input
+                          id="input-member-modal-dob"
+                          type="date"
+                          className="input-field"
+                          max={new Date().toISOString().split('T')[0]}
+                          value={memberFormState.dateOfBirth}
+                          onChange={e => setMemberFormState(prev => ({ ...prev, dateOfBirth: e.target.value }))}
+                        />
+                      </div>
+
+                      <div>
+                        <label className="input-label">ID / Member Identifier</label>
+                        <input
+                          id="input-member-modal-identifier"
+                          className="input-field"
+                          placeholder="e.g. NIK, Resident ID"
+                          value={memberFormState.memberIdentifier}
+                          onChange={e => setMemberFormState(prev => ({ ...prev, memberIdentifier: e.target.value }))}
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+                    <button
+                      type="button"
+                      className="btn-secondary"
+                      onClick={() => { setEditingMember(null); setIsAddMemberModalOpen(false); }}
+                      style={{ padding: '9px 18px', fontSize: '0.88rem' }}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      id="btn-save-member-modal"
+                      className="btn-primary"
+                      disabled={!memberFormState.name.trim()}
+                      onClick={handleSaveMember}
+                      style={{ padding: '9px 22px', fontSize: '0.88rem' }}
+                    >
+                      {editingMember ? 'Save Changes' : 'Add Member'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Continue button if document is uploaded */}
             {uploadedDocs.length > 0 && (
-              <div style={{ marginTop: '20px', display: 'flex', justifyContent: 'center' }}>
+              <div style={{ marginTop: '24px', display: 'flex', justifyContent: 'center' }}>
                 <button
+                  id="btn-continue-from-step1"
                   className="btn-primary"
-                  style={{ padding: '12px 32px', fontSize: '0.95rem' }}
-                  onClick={() => setCurrentStep(2)}
+                  style={{ padding: '12px 34px', fontSize: '0.96rem', display: 'inline-flex', alignItems: 'center', gap: '8px' }}
+                  onClick={handleContinueFromStep1}
                 >
                   {t('reg.next', 'Continue to Pre-Filled Form')} <ArrowRight size={18} />
                 </button>
@@ -1808,7 +2765,7 @@ export const RegistrationEngine: React.FC<Props> = ({ mode = 'customer', onCompl
         </div>
       )}
 
-      {/* STEP 5: SUPPORTING DOCUMENTS */}
+      {/* STEP 5: SUPPORTING DOCUMENTS (PER MEMBER) */}
       {currentStep === 5 && (
         <div className="glass-card card-accent-blue animate-fade-in" style={{ padding: '32px' }}>
           <div style={{ marginBottom: '24px' }}>
@@ -1816,100 +2773,95 @@ export const RegistrationEngine: React.FC<Props> = ({ mode = 'customer', onCompl
               {t('reg.docs.title', 'Supporting Documents Upload')}
             </h3>
             <p style={{ color: 'var(--text-sub)', fontSize: '0.88rem', marginTop: '4px' }}>
-              {t('reg.docs.subtitle', 'Upload any additional documents (Family Birth Certificates, Visas, Medical Records).')}
+              {t('reg.docs.subtitle', 'Upload identity and supporting documents for each family member.')}
             </p>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '24px' }}>
-            <div>
-              <label className="input-label">{t('reg.step1.docTypeLabel', 'Document Category')}</label>
-              <select
-                className="input-field"
-                value={selectedDocType}
-                onChange={e => setSelectedDocType(e.target.value as any)}
-              >
-                <option value="Passport">{t('reg.passportNum', 'Passport')}</option>
-                <option value="UNHCR Card">{t('reg.unhcrCard', 'UNHCR Identity Card / Certificate')}</option>
-                <option value="National ID">{t('reg.nationalId', 'National ID / Identity Card')}</option>
-                <option value="Asylum Certificate">{t('reg.asylumCert', 'Asylum Seeker Certificate')}</option>
-                <option value="Visa">{t('reg.visa', 'Visa / Resettlement Permit')}</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="input-label">{t('reg.selectFileToUpload', 'Select File to Upload')}</label>
-              <div
-                style={{
-                  border: '2px dashed #CBD5E1',
-                  borderRadius: 'var(--radius-sm)',
-                  padding: '16px',
-                  textAlign: 'center',
-                  background: '#F8FAFC',
-                  cursor: 'pointer',
-                  position: 'relative',
-                }}
-              >
-                <input
-                  type="file"
-                  onChange={handleAdditionalFileUpload}
-                  style={{ position: 'absolute', inset: 0, opacity: 0, cursor: 'pointer' }}
-                />
-                <UploadCloud size={24} style={{ color: '#2563EB', marginBottom: '4px' }} />
-                <div style={{ fontSize: '0.88rem', fontWeight: 600, color: 'var(--text-main)' }}>
-                  {t('reg.step1.dragDrop', 'Click to Choose Document File or Drag & Drop')}
+          {[
+            { 
+               id: headOfFamily.id || 'MEM-HEAD', 
+               isHead: true, 
+               firstName: headOfFamily.firstName || 'Applicant', 
+               lastName: headOfFamily.lastName || 'Family' 
+            },
+            ...members.map((m, i) => ({ 
+               id: m.id || `MEM-${i+2}`, 
+               isHead: false, 
+               firstName: m.firstName || 'Family', 
+               lastName: m.lastName || 'Member' 
+            }))
+          ].map(person => (
+            <div key={person.id} style={{ padding: '22px', background: '#F8FAFC', borderRadius: '12px', border: '1px solid var(--border-color)', marginBottom: '24px' }}>
+              <h4 style={{ fontSize: '1.05rem', fontWeight: 800, color: '#2563EB', marginBottom: '16px' }}>
+                {person.firstName} {person.lastName} {person.isHead && <span style={{ fontSize: '0.8rem', color: '#64748B', marginLeft: '6px' }}>(Head of Family)</span>}
+              </h4>
+              
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '16px' }}>
+                <div>
+                  <SearchableSelect
+                    id={`doc-type-${person.id}`}
+                    label={t('reg.step1.docTypeLabel', 'Document Category')}
+                    placeholder="— Select Document Type —"
+                    options={documentOptions.length > 0 ? documentOptions : [
+                      { value: 'Passport', label: 'Passport' },
+                      { value: 'UNHCR Card', label: 'UNHCR Identity Card / Certificate' },
+                      { value: 'National ID', label: 'National ID / Identity Card' },
+                      { value: 'Asylum Certificate', label: 'Asylum Seeker Certificate' },
+                      { value: 'Visa', label: 'Visa / Resettlement Permit' },
+                      { value: 'Birth Certificate', label: 'Birth Certificate' },
+                      { value: 'Health Record', label: 'Health Record / Medical Certificate' }
+                    ]}
+                    value={memberDocTypes[person.id] || ''}
+                    onChange={val => setMemberDocTypes(prev => ({ ...prev, [person.id]: val }))}
+                  />
                 </div>
-                <div style={{ fontSize: '0.75rem', color: 'var(--text-sub)' }}>
-                  PDF, JPG, PNG, WEBP
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <h4 style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--text-main)', marginBottom: '12px' }}>
-            {t('reg.uploadedFiles', 'Uploaded Files')} ({uploadedDocs.length})
-          </h4>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '30px' }}>
-            {uploadedDocs.map(doc => (
-              <div
-                key={doc.id}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  padding: '14px 18px',
-                  background: '#F8FAFC',
-                  borderRadius: '8px',
-                  border: '1px solid var(--border-color)',
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-                  {doc.fileDataUrl ? (
-                    <img 
-                      src={doc.fileDataUrl} 
-                      alt="Preview" 
-                      style={{ width: '48px', height: '48px', objectFit: 'cover', borderRadius: '6px', border: '1px solid #CBD5E1' }} 
+                <div>
+                  <label className="input-label">{t('reg.uploadDocumentsLabel', 'Upload Documents')}</label>
+                  <div style={{ position: 'relative' }}>
+                    <input
+                      type="file"
+                      onChange={e => handleMemberDocUploadCustom(person.id, memberDocTypes[person.id] || 'Identity Document', e)}
+                      style={{ opacity: 0, position: 'absolute', inset: 0, cursor: 'pointer', zIndex: 2 }}
                     />
-                  ) : (
-                    <FileText size={32} style={{ color: '#2563EB' }} />
-                  )}
-                  <div>
-                    <div style={{ fontWeight: 700, fontSize: '0.92rem', color: 'var(--text-main)' }}>
-                      {doc.fileName}
-                    </div>
-                    <div style={{ fontSize: '0.78rem', color: 'var(--text-sub)', marginTop: '2px' }}>
-                      {t('common.status', 'Type')}: <strong>{doc.documentType}</strong> • {doc.fileSize}
-                    </div>
+                    <button
+                      type="button"
+                      className="btn-secondary"
+                      style={{ width: '100%', justifyContent: 'center', background: '#FFFFFF', border: '2px dashed #CBD5E1', padding: '12px' }}
+                    >
+                      <UploadCloud size={20} style={{ color: '#2563EB', marginRight: '8px' }} /> 
+                      <span style={{ fontWeight: 600 }}>+ Add Document</span>
+                    </button>
                   </div>
                 </div>
-                <button
-                  onClick={() => removeDoc(doc.id)}
-                  style={{ background: 'none', border: 'none', color: '#EF4444', cursor: 'pointer' }}
-                >
-                  <Trash2 size={18} />
-                </button>
               </div>
-            ))}
-          </div>
+
+              {/* Show uploaded documents for this person */}
+              {uploadedDocs.filter(d => d.memberId === person.id).length > 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '16px' }}>
+                  {uploadedDocs.filter(d => d.memberId === person.id).map(doc => (
+                    <div key={doc.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 18px', background: '#FFFFFF', borderRadius: '8px', border: '1px solid #E2E8F0' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                        {doc.fileDataUrl ? (
+                          <img src={doc.fileDataUrl} alt="Preview" style={{ width: '40px', height: '40px', objectFit: 'cover', borderRadius: '6px', border: '1px solid #CBD5E1' }} />
+                        ) : (
+                          <FileText size={28} style={{ color: '#2563EB' }} />
+                        )}
+                        <div>
+                          <div style={{ fontWeight: 700, fontSize: '0.9rem', color: 'var(--text-main)' }}>{doc.fileName}</div>
+                          <div style={{ fontSize: '0.75rem', color: 'var(--text-sub)', marginTop: '2px' }}>
+                            Type: <strong>{doc.documentType}</strong> • {doc.fileSize}
+                          </div>
+                        </div>
+                      </div>
+                      <button onClick={() => removeDoc(doc.id)} style={{ background: 'none', border: 'none', color: '#EF4444', cursor: 'pointer' }}>
+                        <Trash2 size={18} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
 
           <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '24px' }}>
             <button

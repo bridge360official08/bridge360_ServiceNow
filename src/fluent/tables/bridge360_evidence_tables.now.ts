@@ -52,6 +52,14 @@ export const u_bridge360_country_document = Table({
         supporting: { label: 'Supporting Humanitarian Evidence' },
       },
     }),
+    u_registration_scope: ChoiceColumn({
+      label: 'Registration Scope',
+      choices: {
+        individual: { label: 'Individual Registration' },
+        family: { label: 'Family Registration' },
+        both: { label: 'Both Individual & Family' },
+      },
+    }),
     u_issuing_authority_desc: StringColumn({ label: 'Issuing Authority Description', maxLength: 255 }),
     u_security_features: StringColumn({ label: 'Security & Forensic Features', maxLength: 1000 }),
     u_typical_fields: StringColumn({ label: 'Typical Extracted Fields', maxLength: 1000 }),
@@ -199,6 +207,7 @@ export const u_bridge360_country_document_field = Table({
         text: { label: 'Text' },
         date: { label: 'Date' },
         image: { label: 'Image' },
+        json: { label: 'JSON Array / Structured Data' },
       },
     }),
     u_active: BooleanColumn({ label: 'Active', defaultValue: true }),

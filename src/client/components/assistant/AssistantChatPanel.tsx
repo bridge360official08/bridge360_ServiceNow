@@ -404,6 +404,7 @@ export const AssistantChatPanel: React.FC<{ position: { right: number; bottom: n
         <form onSubmit={handleSend} style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
           <input
             type="text"
+            className="b360-chat-input-text"
             value={inputText}
             onChange={(e) => setInputText(e.target.value)}
             placeholder={isCustomer
@@ -457,6 +458,15 @@ export const AssistantChatPanel: React.FC<{ position: { right: number; bottom: n
       </div>
 
       <style>{`
+        .b360-chat-input-text {
+          background-color: rgba(255, 255, 255, 0.05) !important;
+          color: #F1F5F9 !important;
+          -webkit-text-fill-color: #F1F5F9 !important;
+        }
+        .b360-chat-input-text::placeholder {
+          color: #94A3B8 !important;
+          -webkit-text-fill-color: #94A3B8 !important;
+        }
         @keyframes doubtbox-in {
           0% { opacity: 0; transform: translateY(20px) scale(.95); }
           100% { opacity: 1; transform: translateY(0) scale(1); }

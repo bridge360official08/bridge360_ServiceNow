@@ -80,10 +80,18 @@ export class EvidenceFoundationService {
 
   // ── 2. Reference Documents Catalog ──────────────────────────────────────
 
-  public async getCountryDocuments(countryId?: string): Promise<CountryDocumentRecord[]> {
+  public async getCountryDocuments(countryId?: string, registrationScope?: 'individual' | 'family' | 'both'): Promise<CountryDocumentRecord[]> {
     try {
-      const query = countryId ? `u_country=${countryId}^u_active=true` : 'u_active=true';
-      const records = await snGetTableRecords<any>('u_bridge360_country_document', query);
+      let query = 'u_active=true';
+      if (countryId) {
+        query = `u_country=${countryId}^${query}`;
+      }
+      if (registrationScope === 'family') {
+        query += '^u_registration_scopeINfamily,both';
+      } else if (registrationScope === 'individual') {
+        query += '^u_registration_scopeINindividual,both';
+      }
+      const records = await snGetTableRecords<any>('u_bridge360_country_document', query, 500);
       if (records && records.length > 0) {
         return records.map((r: any) => ({
           id: r.sys_id,
@@ -92,6 +100,7 @@ export class EvidenceFoundationService {
           documentName: r.u_document_name || '',
           localName: r.u_local_name || '',
           documentCategory: r.u_document_category || 'identity',
+          registrationScope: (r.u_registration_scope || 'individual') as 'individual' | 'family' | 'both',
           issuingAuthorityDesc: r.u_issuing_authority_desc || '',
           securityFeatures: r.u_security_features || '',
           typicalFields: r.u_typical_fields || '',
@@ -100,6 +109,9 @@ export class EvidenceFoundationService {
           active: r.u_active === 'true' || r.u_active === true,
           notes: r.u_notes || '',
         }));
+      } else if (countryId) {
+        // Return empty array if no documents match this country / scope in ServiceNow
+        return [];
       } else {
         throw new Error('No country documents returned from ServiceNow');
       }
@@ -107,10 +119,16 @@ export class EvidenceFoundationService {
       console.warn('Using local country document catalog fallback:', e);
     }
 
+    let docs = this.localDocuments;
     if (countryId) {
-      return this.localDocuments.filter(d => d.countryId === countryId || d.countryName.toLowerCase() === countryId.toLowerCase());
+      docs = docs.filter(d => d.countryId === countryId || d.countryName.toLowerCase() === countryId.toLowerCase());
     }
-    return this.localDocuments;
+    if (registrationScope === 'family') {
+      docs = docs.filter(d => d.registrationScope === 'family' || d.registrationScope === 'both');
+    } else if (registrationScope === 'individual') {
+      docs = docs.filter(d => !d.registrationScope || d.registrationScope === 'individual' || d.registrationScope === 'both');
+    }
+    return docs;
   }
 
   // ── 2b. Country Document Fields (Dynamic from u_bridge360_country_document_field) ──
@@ -119,13 +137,13 @@ export class EvidenceFoundationService {
     if (!countryDocumentId) return [];
     try {
       const query = `u_country_document=${countryDocumentId}^u_active=true`;
-      const records = await snGetTableRecords<any>('u_bridge360_country_document_field', query);
+      const records = await snGetTableRecords<any>('u_bridge360_country_document_field', query, 500);
       if (records && records.length > 0) {
         return records.map((r: any) => ({
           id: r.sys_id,
           countryDocumentId: r.u_country_document?.value || r.u_country_document || '',
           fieldName: r.u_field_name || '',
-          fieldType: (r.u_field_type || 'text') as 'text' | 'date' | 'image',
+          fieldType: (r.u_field_type || 'text') as 'text' | 'date' | 'image' | 'json',
           active: r.u_active === 'true' || r.u_active === true,
           notes: r.u_notes || '',
         }));

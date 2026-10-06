@@ -1,5 +1,5 @@
 // AgentOrchestrator.ts
-// Deterministic, advisory-only multi-agent pipeline used for instant admin UI feedback.
+// Deterministic, advisory-only checks with visible per-agent progress for admins.
 
 import { FamilyRecord, DocumentRecord } from '../types/bridge360';
 
@@ -32,6 +32,12 @@ export interface AgentResult {
   };
 }
 
+export type AdvisoryStageProgress = (
+  stageId: 'triage' | 'docs' | 'completeness' | 'support' | 'risk' | 'decision',
+  status: 'active' | 'done',
+  detail?: string,
+) => void;
+
 export class AgentOrchestrator {
   /** Evaluate a family without changing its records or making a decision. */
   public static evaluate(
@@ -50,8 +56,40 @@ export class AgentOrchestrator {
   static async runWorkflow(
     family: FamilyRecord,
     documents: DocumentRecord[],
+    onProgress?: AdvisoryStageProgress,
   ): Promise<AgentResult> {
-    return AgentOrchestrator.evaluate(family, documents);
+    const pause = () => new Promise<void>(resolve => setTimeout(resolve, 240));
+    onProgress?.('triage', 'active');
+    await pause();
+    const triage = AgentOrchestrator.runTriageAgent(family);
+    onProgress?.('triage', 'done', `${triage.assignedOfficer} · ${triage.priority} priority`);
+
+    onProgress?.('docs', 'active');
+    await pause();
+    const docAnalysis = AgentOrchestrator.runDocAnalystAgent(family, documents);
+    onProgress?.('docs', 'done', `${docAnalysis.initialMatchCount} initial text match(es)`);
+
+    onProgress?.('completeness', 'active');
+    await pause();
+    const completenessReview = AgentOrchestrator.runCompletenessAgent(family, documents);
+    onProgress?.('completeness', 'done', completenessReview.status);
+
+    onProgress?.('support', 'active');
+    await pause();
+    const supportPlan = AgentOrchestrator.runSupportPlanningAgent(family);
+    onProgress?.('support', 'done', `${supportPlan.recommendations.length} recommendation(s)`);
+
+    onProgress?.('risk', 'active');
+    await pause();
+    const riskAssessment = AgentOrchestrator.runRiskAssessmentAgent(docAnalysis, completenessReview);
+    onProgress?.('risk', 'done', `${riskAssessment.score} risk`);
+
+    onProgress?.('decision', 'active');
+    await pause();
+    const decisionDraft = AgentOrchestrator.runDecisionDraftAgent(docAnalysis, completenessReview);
+    onProgress?.('decision', 'done', decisionDraft.recommendation);
+
+    return { triage, docAnalysis, completenessReview, supportPlan, riskAssessment, decisionDraft };
   }
 
   /** Report the current assignment without automatically routing or reprioritizing. */

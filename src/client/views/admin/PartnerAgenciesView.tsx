@@ -21,7 +21,8 @@ import { PartnerAgency } from '../../types/bridge360';
 
 export const PartnerAgenciesView: React.FC = () => {
   const { partnerAgencies, referrals, families } = useBridge360();
-  const [agenciesList, setAgenciesList] = useState<PartnerAgency[]>(partnerAgencies);
+  // Local overrides (adds / edits / removes) on top of the context list
+  const [overrides, setOverrides] = useState<{ added: PartnerAgency[]; removed: string[]; edited: Record<string, Partial<PartnerAgency>> }>({ added: [], removed: [], edited: {} });
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedType, setSelectedType] = useState<string>('All');
   const [showAddModal, setShowAddModal] = useState(false);
@@ -35,9 +36,17 @@ export const PartnerAgenciesView: React.FC = () => {
   const [phone, setPhone] = useState('');
   const [capacity, setCapacity] = useState('30');
 
+  // Merge context list + local overrides into one live list
+  const agenciesList: PartnerAgency[] = [
+    ...partnerAgencies
+      .filter(p => !overrides.removed.includes(p.id))
+      .map(p => overrides.edited[p.id] ? { ...p, ...overrides.edited[p.id] } : p),
+    ...overrides.added,
+  ];
+
   const handleRemoveAgency = (id: string, agencyName: string) => {
     if (window.confirm(`Are you sure you want to remove "${agencyName}" from the partner agency directory?`)) {
-      setAgenciesList(prev => prev.filter(p => p.id !== id));
+      setOverrides(prev => ({ ...prev, removed: [...prev.removed, id] }));
     }
   };
 
@@ -46,14 +55,15 @@ export const PartnerAgenciesView: React.FC = () => {
     if (!name.trim()) return;
     
     if (editingId) {
-      setAgenciesList(prev => prev.map(p => 
-        p.id === editingId 
-          ? { ...p, name, type: type as any, location, contactEmail: email, contactPhone: phone, availableCapacity: parseInt(capacity || '20', 10) }
-          : p
-      ));
+      setOverrides(prev => ({
+        ...prev,
+        edited: { ...prev.edited, [editingId]: { name, type: type as any, location, contactEmail: email, contactPhone: phone, availableCapacity: parseInt(capacity || '20', 10) } },
+        // also update if it was a locally-added agency
+        added: prev.added.map(p => p.id === editingId ? { ...p, name, type: type as any, location, contactEmail: email, contactPhone: phone, availableCapacity: parseInt(capacity || '20', 10) } : p),
+      }));
     } else {
       const newAgency: PartnerAgency = {
-        id: `PA-0${agenciesList.length + 1}`,
+        id: `PA-LOCAL-${Date.now()}`,
         name,
         type: type as any,
         location: location || 'Regional Office',
@@ -62,7 +72,7 @@ export const PartnerAgenciesView: React.FC = () => {
         availableCapacity: parseInt(capacity || '20', 10),
         status: 'Active',
       };
-      setAgenciesList(prev => [newAgency, ...prev]);
+      setOverrides(prev => ({ ...prev, added: [newAgency, ...prev.added] }));
     }
     
     setShowAddModal(false);
@@ -92,6 +102,7 @@ export const PartnerAgenciesView: React.FC = () => {
     const matchesType = selectedType === 'All' || p.type === selectedType;
     return matchesSearch && matchesType;
   });
+
 
   return (
     <div style={{ padding: '24px', maxWidth: '1400px', margin: '0 auto' }}>

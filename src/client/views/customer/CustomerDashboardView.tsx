@@ -28,6 +28,7 @@ import {
   Mail
 } from 'lucide-react';
 import { useBridge360 } from '../../store/Bridge360Context';
+import { Bridge360Logo } from '../../components/common/Bridge360Logo';
 
 interface Props {
   onLogout: () => void;
@@ -276,20 +277,7 @@ export const CustomerDashboardView: React.FC<Props> = ({ onLogout }) => {
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-          <div
-            style={{
-              width: '54px',
-              height: '54px',
-              borderRadius: '12px',
-              background: '#EFF6FF',
-              color: '#2563EB',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
-            <ShieldCheck size={28} />
-          </div>
+          <Bridge360Logo size={52} />
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
               <h2 style={{ fontSize: '1.35rem', fontWeight: 800, color: '#0F172A' }}>

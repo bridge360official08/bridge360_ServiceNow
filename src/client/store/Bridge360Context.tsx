@@ -17,7 +17,7 @@ import {
   SNCase,
   SNTicket
 } from '../services/snApi';
-import { AgentOrchestrator, AgentResult } from '../services/AgentOrchestrator';
+import { AgentOrchestrator, AgentResult, type AdvisoryStageProgress } from '../services/AgentOrchestrator';
 import {
   FamilyRecord,
   ApplicationRecord,
@@ -37,8 +37,10 @@ import {
 import { SupportedLanguage, SUPPORTED_LANGUAGES, translations, loadTranslationBundle } from '../utils/i18n';
 import { CentralTranslationEngine } from '../services/CentralTranslationEngine';
 
-// Initial Mock Seed Data
+// Initial Mock Seed Data — covers all 6 partner types from the problem statement
 const INITIAL_PARTNERS: PartnerAgency[] = [
+
+  // ── LEGAL AID ─────────────────────────────────────────────────────────────
   {
     id: 'PA-01',
     name: 'Red Cross Humanitarian Services',
@@ -51,6 +53,28 @@ const INITIAL_PARTNERS: PartnerAgency[] = [
   },
   {
     id: 'PA-02',
+    name: 'National Immigrant Justice Center',
+    type: 'Legal Aid',
+    location: 'Downtown Legal District',
+    contactEmail: 'cases@nijc.org',
+    contactPhone: '+1 800 555 0312',
+    availableCapacity: 30,
+    status: 'Active',
+  },
+  {
+    id: 'PA-03',
+    name: 'Asylum Seeker Advocacy Project',
+    type: 'Legal Aid',
+    location: 'Westside Community Office',
+    contactEmail: 'help@asylumadvocacy.org',
+    contactPhone: '+1 800 555 0476',
+    availableCapacity: 12,
+    status: 'Busy',
+  },
+
+  // ── HEALTHCARE ────────────────────────────────────────────────────────────
+  {
+    id: 'PA-04',
     name: 'St. Jude Community Health Clinic',
     type: 'Healthcare',
     location: 'Northside Medical Center',
@@ -60,7 +84,29 @@ const INITIAL_PARTNERS: PartnerAgency[] = [
     status: 'Active',
   },
   {
-    id: 'PA-03',
+    id: 'PA-05',
+    name: 'Community Health Alliance',
+    type: 'Healthcare',
+    location: 'Midtown Primary Care Campus',
+    contactEmail: 'enroll@communityhealth.org',
+    contactPhone: '+1 800 555 0633',
+    availableCapacity: 55,
+    status: 'Active',
+  },
+  {
+    id: 'PA-06',
+    name: 'Refugee Mental Health Collaborative',
+    type: 'Healthcare',
+    location: 'Southside Wellness Center',
+    contactEmail: 'support@refmentalhealth.org',
+    contactPhone: '+1 800 555 0789',
+    availableCapacity: 22,
+    status: 'Active',
+  },
+
+  // ── HOUSING ───────────────────────────────────────────────────────────────
+  {
+    id: 'PA-07',
     name: 'Hope Housing Alliance',
     type: 'Housing',
     location: 'Eastside Transitional Housing',
@@ -70,7 +116,29 @@ const INITIAL_PARTNERS: PartnerAgency[] = [
     status: 'Busy',
   },
   {
-    id: 'PA-04',
+    id: 'PA-08',
+    name: 'New Roots Resettlement Housing',
+    type: 'Housing',
+    location: 'North Metro Transitional Units',
+    contactEmail: 'housing@newroots.org',
+    contactPhone: '+1 800 555 0922',
+    availableCapacity: 35,
+    status: 'Active',
+  },
+  {
+    id: 'PA-09',
+    name: 'Safe Haven Emergency Shelter Network',
+    type: 'Housing',
+    location: 'Multiple Locations Citywide',
+    contactEmail: 'intake@safehavenshelter.org',
+    contactPhone: '+1 800 555 0101',
+    availableCapacity: 0,
+    status: 'Inactive',
+  },
+
+  // ── LANGUAGE SUPPORT ──────────────────────────────────────────────────────
+  {
+    id: 'PA-10',
     name: 'Global Language & Interpreter Network',
     type: 'Language Support',
     location: 'Virtual / Statewide',
@@ -78,6 +146,90 @@ const INITIAL_PARTNERS: PartnerAgency[] = [
     contactPhone: '+1 800 555 0999',
     availableCapacity: 120,
     status: 'Active',
+  },
+  {
+    id: 'PA-11',
+    name: 'BridgeTalk Multilingual Services',
+    type: 'Language Support',
+    location: 'Virtual / On-Site Available',
+    contactEmail: 'schedule@bridgetalk.org',
+    contactPhone: '+1 800 555 1055',
+    availableCapacity: 75,
+    status: 'Active',
+  },
+  {
+    id: 'PA-12',
+    name: 'Cultural Liaison & Translation Bureau',
+    type: 'Language Support',
+    location: 'City Hall Annex, Suite 210',
+    contactEmail: 'translate@culturalliaison.org',
+    contactPhone: '+1 800 555 1122',
+    availableCapacity: 40,
+    status: 'Active',
+  },
+
+  // ── EDUCATION ─────────────────────────────────────────────────────────────
+  {
+    id: 'PA-13',
+    name: 'Newcomer School Integration Program',
+    type: 'Education',
+    location: 'Metro Unified School District',
+    contactEmail: 'enroll@newcomerschools.org',
+    contactPhone: '+1 800 555 1201',
+    availableCapacity: 200,
+    status: 'Active',
+  },
+  {
+    id: 'PA-14',
+    name: 'Adult ESL & Literacy Center',
+    type: 'Education',
+    location: 'Central Library Campus',
+    contactEmail: 'esl@adultliteracy.org',
+    contactPhone: '+1 800 555 1330',
+    availableCapacity: 60,
+    status: 'Active',
+  },
+  {
+    id: 'PA-15',
+    name: 'Refugee Vocational Training Institute',
+    type: 'Education',
+    location: 'Southside Community College Annex',
+    contactEmail: 'training@rvti.org',
+    contactPhone: '+1 800 555 1445',
+    availableCapacity: 28,
+    status: 'Busy',
+  },
+
+  // ── EMPLOYMENT ────────────────────────────────────────────────────────────
+  {
+    id: 'PA-16',
+    name: 'Refugee Employment Pathways Initiative',
+    type: 'Employment',
+    location: 'Workforce Development Center',
+    contactEmail: 'jobs@refugeepathways.org',
+    contactPhone: '+1 800 555 1560',
+    availableCapacity: 50,
+    status: 'Active',
+  },
+  {
+    id: 'PA-17',
+    name: 'New Americans Career Network',
+    type: 'Employment',
+    location: 'Business District, Suite 400',
+    contactEmail: 'careers@newamericansnet.org',
+    contactPhone: '+1 800 555 1677',
+    availableCapacity: 35,
+    status: 'Active',
+  },
+  {
+    id: 'PA-18',
+    name: 'Immigrant Skills & Job Placement Center',
+    type: 'Employment',
+    location: 'Eastside Economic Empowerment Hub',
+    contactEmail: 'placement@iskillscenter.org',
+    contactPhone: '+1 800 555 1789',
+    availableCapacity: 15,
+    status: 'Busy',
   },
 ];
 
@@ -520,6 +672,8 @@ interface Bridge360ContextType {
       needsInterpreter: boolean;
     };
     members: Partial<FamilyMember>[];
+    familyMembers?: any[];
+    selectedApplicantMemberId?: string;
     emergencyContact: any;
     uploadedDocs: DocumentRecord[];
   }) => Promise<string>; // Returns Application ID
@@ -562,7 +716,7 @@ interface Bridge360ContextType {
   uploadCustomerDoc: (applicationId: string, docType: string, fileName: string, fileSize: string, rawText?: string) => Promise<void>;
   updateCustomerProfile: (applicationId: string, profileData: any) => Promise<void>;
   requestAdditionalDocuments: (applicationId: string, docType: string, notes: string) => Promise<void>;
-  runAgenticWorkflow: (familyId: string) => Promise<AgentResult>;
+  runAgenticWorkflow: (familyId: string, onProgress?: AdvisoryStageProgress) => Promise<AgentResult>;
   
   notifications: Array<{
     id: string;
@@ -1086,25 +1240,37 @@ export const Bridge360Provider: React.FC<{ children: React.ReactNode }> = ({ chi
       needsInterpreter: boolean;
     };
     members: Partial<FamilyMember>[];
+    familyMembers?: any[];
+    selectedApplicantMemberId?: string;
     emergencyContact: any;
     uploadedDocs: DocumentRecord[];
   }): Promise<string> => {
     let serverAppId = '';
     let serverRid = '';
     let serverFamId = '';
+    let serverFamilySysId = '';
+    let serverHeadSysId = '';
+    let persistedMembersSummary: any[] = [];
 
     try {
       const result = await snSubmitRegistration({
         headOfFamily:   data.headOfFamily as any,
         familyInfo:     data.familyInfo as any,
         members:        data.members as any,
+        familyMembers:  data.familyMembers as any,
+        selectedApplicantMemberId: data.selectedApplicantMemberId,
         emergencyContact: data.emergencyContact,
         uploadedDocs:   data.uploadedDocs as any,
       });
       if (result.success && result.applicationId) {
         serverAppId = result.applicationId;
         serverRid = result.bridge360Id || '';
-        serverFamId = result.familyId || '';
+        serverFamId = result.familyId || result.familySysId || '';
+        serverFamilySysId = result.familySysId || '';
+        serverHeadSysId = result.headSysId || result.applicantMemberSysId || '';
+        if (Array.isArray(result.persistedMembers)) {
+          persistedMembersSummary = result.persistedMembers;
+        }
       }
     } catch (e) {
       console.warn('ServiceNow REST register call returned error, saving locally:', e);
@@ -1115,9 +1281,14 @@ export const Bridge360Provider: React.FC<{ children: React.ReactNode }> = ({ chi
     const finalRid = serverRid || ''; // Empty until verified
     const finalFamId = serverFamId || ''; // Empty until all verified
 
+    // Find head member's ServiceNow sys_id from persistedMembers if returned
+    const headPersisted = persistedMembersSummary.find(pm => pm.isHead || pm.sys_id === serverHeadSysId);
+    const finalHeadSysId = headPersisted?.sys_id || serverHeadSysId || '';
+
     const headMember: FamilyMember = {
       id: `MEM-${seq}-HEAD`,
       familyId: finalFamId,
+      serviceNowSysId: finalHeadSysId,
       isHeadOfFamily: true,
       relationshipToHead: 'Self',
       firstName: data.headOfFamily.firstName || 'Applicant',
@@ -1140,30 +1311,45 @@ export const Bridge360Provider: React.FC<{ children: React.ReactNode }> = ({ chi
       refugeeId: '',
     };
 
-    const accompanyingMembers: FamilyMember[] = data.members.map((m, idx) => ({
-      id: `MEM-${seq}-${idx + 2}`,
-      familyId: finalFamId,
-      isHeadOfFamily: false,
-      relationshipToHead: m.relationshipToHead || 'Dependant',
-      firstName: m.firstName || 'Family',
-      lastName: m.lastName || data.familyInfo.familyName || 'Member',
-      gender: m.gender || 'Other',
-      dateOfBirth: m.dateOfBirth || '2010-01-01',
-      nationality: m.nationality || data.familyInfo.countryOfOrigin || 'Unknown',
-      maritalStatus: 'Single',
-      mobileNumber: '',
-      email: '',
-      address: headMember.address,
-      city: headMember.city,
-      state: headMember.state,
-      postalCode: headMember.postalCode,
-      preferredLanguage: headMember.preferredLanguage,
-      documentIds: [],
-      refugeeId: '',
-    }));
+    const nonHeadPersisted = persistedMembersSummary.filter(pm => !pm.isHead && pm.sys_id !== finalHeadSysId);
+
+    const accompanyingMembers: FamilyMember[] = data.members.map((m, idx) => {
+      // Attempt matching persisted record by clientTempId, or by matching first/last name, or index
+      const matchedPm = nonHeadPersisted.find(pm =>
+        (m.id && pm.clientTempId === m.id) ||
+        (pm.firstName && m.firstName && pm.firstName.toLowerCase() === m.firstName.toLowerCase())
+      ) || nonHeadPersisted[idx];
+
+      const memSysId = matchedPm?.sys_id || '';
+
+      return {
+        id: `MEM-${seq}-${idx + 2}`,
+        familyId: finalFamId,
+        serviceNowSysId: memSysId,
+        isHeadOfFamily: false,
+        relationshipToHead: m.relationshipToHead || 'Dependant',
+        firstName: m.firstName || 'Family',
+        lastName: m.lastName || data.familyInfo.familyName || 'Member',
+        gender: m.gender || 'Other',
+        dateOfBirth: m.dateOfBirth || '2010-01-01',
+        nationality: m.nationality || data.familyInfo.countryOfOrigin || 'Unknown',
+        maritalStatus: 'Single',
+        mobileNumber: '',
+        email: '',
+        address: headMember.address,
+        city: headMember.city,
+        state: headMember.state,
+        postalCode: headMember.postalCode,
+        preferredLanguage: headMember.preferredLanguage,
+        documentIds: [],
+        refugeeId: '',
+      };
+    });
 
     const newFamily: FamilyRecord = {
       id: finalAppId,
+      sys_id: serverFamilySysId || finalAppId,
+      serviceNowSysId: serverFamilySysId,
       bridge360Id: finalRid,
       applicationId: finalAppId,
       familyName: data.familyInfo.familyName || `${headMember.lastName} Family`,
@@ -1189,7 +1375,7 @@ export const Bridge360Provider: React.FC<{ children: React.ReactNode }> = ({ chi
     // Also populate liveDashboardData so customer dashboard can immediately view this record
     setLiveDashboardData({
       family: {
-        sys_id: finalAppId,
+        sys_id: serverFamilySysId || finalAppId,
         applicationId: finalAppId,
         bridge360Id: finalRid,
         familyName: newFamily.familyName,
@@ -1207,7 +1393,7 @@ export const Bridge360Provider: React.FC<{ children: React.ReactNode }> = ({ chi
       },
       members: [
         {
-          sys_id: headMember.id,
+          sys_id: headMember.serviceNowSysId || headMember.id,
           isHead: true,
           relationship: 'Self',
           firstName: headMember.firstName,
@@ -1226,7 +1412,7 @@ export const Bridge360Provider: React.FC<{ children: React.ReactNode }> = ({ chi
           postalCode: headMember.postalCode,
         },
         ...accompanyingMembers.map(m => ({
-          sys_id: m.id,
+          sys_id: m.serviceNowSysId || m.id,
           isHead: false,
           relationship: m.relationshipToHead || 'Member',
           firstName: m.firstName,
@@ -1949,14 +2135,17 @@ export const Bridge360Provider: React.FC<{ children: React.ReactNode }> = ({ chi
   };
 
   // Run Orchestrated Agentic Workflow (Triage, Document Analysis, Risk, Decision Drafter)
-  const runAgenticWorkflow = async (familyId: string): Promise<AgentResult> => {
+  const runAgenticWorkflow = async (
+    familyId: string,
+    onProgress?: AdvisoryStageProgress,
+  ): Promise<AgentResult> => {
     const fam = families.find(f => f.id === familyId || f.applicationId === familyId);
     if (!fam) throw new Error('Family not found');
 
     const famDocs = documents.filter(d => d.familyId === familyId || d.applicationId === familyId);
     
     // 1. Run local agentic pipeline for instant UI feedback
-    const result = await AgentOrchestrator.runWorkflow(fam, famDocs);
+    const result = await AgentOrchestrator.runWorkflow(fam, famDocs, onProgress);
 
     // Keep the workflow advisory: only create a draft note; do not verify documents,
     // change case fields, mint IDs, or invoke the server-side write workflow.
@@ -1964,7 +2153,7 @@ export const Bridge360Provider: React.FC<{ children: React.ReactNode }> = ({ chi
       id: `NOTE-AGENT-${Date.now()}`,
       familyId,
       author: 'AI Intern Agent',
-      text: `Advisory draft (no changes applied): ${result.decisionDraft.recommendation}\nJustification: ${result.decisionDraft.justification}`,
+      text: `Advisory draft (no case or document status, assignment, or approval changed): ${result.decisionDraft.recommendation}\nJustification: ${result.decisionDraft.justification}`,
       timestamp: new Date().toLocaleString(),
     };
     setNotes(prev => [newNote, ...prev]);
@@ -1974,7 +2163,7 @@ export const Bridge360Provider: React.FC<{ children: React.ReactNode }> = ({ chi
         id: `TL-AGENT-${Date.now()}`,
         familyId,
         title: 'AI Advisory Assessment Prepared',
-        description: `Draft recommendation: ${result.decisionDraft.recommendation}. No records were changed.`,
+        description: `Draft recommendation: ${result.decisionDraft.recommendation}. No case or document status, assignment, or approval was changed.`,
         type: 'note',
         timestamp: new Date().toLocaleString(),
         actor: 'AI Intern Agent',

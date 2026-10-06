@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { NavTab } from '../../types';
 import { Avatar } from '../common/Avatar';
+import { Bridge360Logo } from '../common/Bridge360Logo';
 
 export interface SidebarProps {
   activeTab: NavTab;
@@ -68,21 +69,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <div
-            style={{
-              width: '34px',
-              height: '34px',
-              borderRadius: 'var(--radius-sm)',
-              backgroundColor: 'var(--color-primary-600)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: 'var(--color-white)',
-              boxShadow: 'var(--shadow-xs)',
-            }}
-          >
-            <ShieldCheck size={20} />
-          </div>
+          <Bridge360Logo size={34} />
           {!isCollapsed && (
             <div>
               <h2 style={{ fontSize: '16px', fontWeight: 700, color: 'var(--color-white)', letterSpacing: '-0.01em' }}>
