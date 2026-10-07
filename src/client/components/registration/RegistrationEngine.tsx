@@ -2805,7 +2805,7 @@ export const RegistrationEngine: React.FC<Props> = ({ mode = 'customer', onCompl
                     id={`doc-type-${extractedFamilyMembers[currentMemberDocIndex].id}`}
                     label={t('reg.step1.docTypeLabel', 'Document Category')}
                     placeholder="— Select Document Type —"
-                    options={[
+                    options={availableDocuments.length > 0 ? availableDocuments.map(d => ({ value: d.documentType, label: d.name })) : [
                       { value: 'Passport', label: 'Passport' },
                       { value: 'UNHCR Card', label: 'UNHCR Identity Card / Certificate' },
                       { value: 'National ID', label: 'National ID / Identity Card' }
