@@ -523,6 +523,15 @@ export const INITIAL_COUNTRIES: CountryRecord[] = [
 
 export const INITIAL_COUNTRY_DOCUMENTS: CountryDocumentRecord[] = [
   {
+    "id": "MOCK-SL-FAMILY-DOC",
+    "countryId": "CTRY-LKA",
+    "countryName": "Sri Lanka",
+    "documentName": "Grama Niladhari Certificate",
+    "documentCategory": "identity",
+    "registrationScope": "family",
+    "active": true
+  },
+  {
     "id": "01ba349a901703107f446fc9fda902ab",
     "countryId": "abdde3f5b85f03107f44816ad71b5e81",
     "countryName": "Turkey",

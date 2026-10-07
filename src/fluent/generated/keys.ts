@@ -815,7 +815,7 @@ declare global {
                     {
                         table: 'sys_ux_lib_asset'
                         id: '28ebf215f8584f1181946332124006c6'
-                        deleted: false
+                        deleted: true
                         key: {
                             name: 'global/index.js.map'
                         }
@@ -1999,6 +1999,7 @@ declare global {
                     {
                         table: 'sys_ux_lib_asset'
                         id: '69ae69f6b4c6483d90bf85be583a84cd'
+                        deleted: true
                         key: {
                             name: '../../bridge360_updated_v2/bridge360_updated/bridge360/src/client/main'
                         }
@@ -2808,6 +2809,7 @@ declare global {
                     {
                         table: 'sn_glider_source_artifact_m2m'
                         id: '943361ec860d44739ffb043b29f4b57a'
+                        deleted: true
                         key: {
                             application_file: '69ae69f6b4c6483d90bf85be583a84cd'
                             source_artifact: '9273002f432840a591c3115f791fd518'
@@ -3273,7 +3275,7 @@ declare global {
                     {
                         table: 'sn_glider_source_artifact_m2m'
                         id: 'a99f42a41cb64ae790e553075a863dc6'
-                        deleted: true
+                        deleted: false
                         key: {
                             application_file: 'e128f469876d4b3bb0883ad18a79b4bd'
                             source_artifact: '9273002f432840a591c3115f791fd518'
@@ -3377,7 +3379,7 @@ declare global {
                     {
                         table: 'sn_glider_source_artifact_m2m'
                         id: 'ad36a0a68a4a408bba02f63963bced35'
-                        deleted: true
+                        deleted: false
                         key: {
                             application_file: '45e0d7df543c472a96717ba491c75e85'
                             source_artifact: '9273002f432840a591c3115f791fd518'
@@ -4054,7 +4056,7 @@ declare global {
                     {
                         table: 'sys_ux_lib_asset'
                         id: 'd2bc577d1893479ea7788deb62a0219a'
-                        deleted: false
+                        deleted: true
                         key: {
                             name: 'global/index'
                         }
