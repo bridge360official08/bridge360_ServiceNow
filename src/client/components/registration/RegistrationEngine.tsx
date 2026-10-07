@@ -1080,7 +1080,7 @@ export const RegistrationEngine: React.FC<Props> = ({ mode = 'customer', onCompl
       setStepErrors({});
       if (familyInfo.householdSize === 1) {
         setCurrentStep(5);
-        setProactiveMessage("Perfect! Let's fill out your emergency contact.");
+        setProactiveMessage("Perfect! Now please upload your identity documents.");
         playAnimation('point');
       } else {
         setCurrentStep(4);
@@ -1109,10 +1109,10 @@ export const RegistrationEngine: React.FC<Props> = ({ mode = 'customer', onCompl
     }
   };
 
-  const handleNextFromStep5 = () => {
+  const handleNextFromStep6 = () => {
     if (validateStep6()) {
       setStepErrors({});
-      setCurrentStep(7);
+      setCurrentStep(8);
       setProactiveMessage("Almost done! Please review your declaration and submit.");
       playAnimation('wave');
       window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -1224,13 +1224,13 @@ export const RegistrationEngine: React.FC<Props> = ({ mode = 'customer', onCompl
         uploadedDocs,
       });
       setSubmittedAppId(appId);
-      setCurrentStep(7);
+      setCurrentStep(8);
     } catch (err: any) {
       console.error('Registration submission error:', err);
       // Fallback: Generate local Application ID and register locally so user is never blocked
       const fallbackId = 'APP-2026-DEMO';
       setSubmittedAppId(fallbackId);
-      setCurrentStep(7);
+      setCurrentStep(8);
     } finally {
       setIsSubmitting(false);
     }
@@ -2764,8 +2764,128 @@ export const RegistrationEngine: React.FC<Props> = ({ mode = 'customer', onCompl
         </div>
       )}
 
-      {/* STEP 5: EMERGENCY CONTACT */}
-      {currentStep === 5 && (
+      {/* STEP 5: SUPPORTING DOCUMENTS (PER MEMBER) */}
+      {currentStep === 8 && (
+        <div className="glass-card card-accent-blue animate-fade-in" style={{ padding: '32px' }}>
+          <div style={{ marginBottom: '24px' }}>
+            <h3 style={{ fontSize: '1.3rem', fontWeight: 800, color: 'var(--text-main)' }}>
+              {t('reg.docs.title', 'Supporting Documents Upload')}
+            </h3>
+            <p style={{ color: 'var(--text-sub)', fontSize: '0.88rem', marginTop: '4px' }}>
+              {t('reg.docs.subtitle', 'Upload identity and supporting documents for each family member.')}
+            </p>
+          </div>
+
+          {[
+            { 
+               id: headOfFamily.id || 'MEM-HEAD', 
+               isHead: true, 
+               firstName: headOfFamily.firstName || 'Applicant', 
+               lastName: headOfFamily.lastName || 'Family' 
+            },
+            ...members.map((m, i) => ({ 
+               id: m.id || `MEM-${i+2}`, 
+               isHead: false, 
+               firstName: m.firstName || 'Family', 
+               lastName: m.lastName || 'Member' 
+            }))
+          ].map(person => (
+            <div key={person.id} style={{ padding: '22px', background: '#F8FAFC', borderRadius: '12px', border: '1px solid var(--border-color)', marginBottom: '24px' }}>
+              <h4 style={{ fontSize: '1.05rem', fontWeight: 800, color: '#2563EB', marginBottom: '16px' }}>
+                {person.firstName} {person.lastName} {person.isHead && <span style={{ fontSize: '0.8rem', color: '#64748B', marginLeft: '6px' }}>(Head of Family)</span>}
+              </h4>
+              
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '16px' }}>
+                <div>
+                  <SearchableSelect
+                    id={`doc-type-${person.id}`}
+                    label={t('reg.step1.docTypeLabel', 'Document Category')}
+                    placeholder="— Select Document Type —"
+                    options={documentOptions.length > 0 ? documentOptions : [
+                      { value: 'Passport', label: 'Passport' },
+                      { value: 'UNHCR Card', label: 'UNHCR Identity Card / Certificate' },
+                      { value: 'National ID', label: 'National ID / Identity Card' },
+                      { value: 'Asylum Certificate', label: 'Asylum Seeker Certificate' },
+                      { value: 'Visa', label: 'Visa / Resettlement Permit' },
+                      { value: 'Birth Certificate', label: 'Birth Certificate' },
+                      { value: 'Health Record', label: 'Health Record / Medical Certificate' }
+                    ]}
+                    value={memberDocTypes[person.id] || ''}
+                    onChange={val => setMemberDocTypes(prev => ({ ...prev, [person.id]: val }))}
+                  />
+                </div>
+                <div>
+                  <label className="input-label">{t('reg.uploadDocumentsLabel', 'Upload Documents')}</label>
+                  <div style={{ position: 'relative' }}>
+                    <input
+                      type="file"
+                      onChange={e => handleMemberDocUploadCustom(person.id, memberDocTypes[person.id] || 'Identity Document', e)}
+                      style={{ opacity: 0, position: 'absolute', inset: 0, cursor: 'pointer', zIndex: 2 }}
+                    />
+                    <button
+                      type="button"
+                      className="btn-secondary"
+                      style={{ width: '100%', justifyContent: 'center', background: '#FFFFFF', border: '2px dashed #CBD5E1', padding: '12px' }}
+                    >
+                      <UploadCloud size={20} style={{ color: '#2563EB', marginRight: '8px' }} /> 
+                      <span style={{ fontWeight: 600 }}>+ Add Document</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Show uploaded documents for this person */}
+              {uploadedDocs.filter(d => d.memberId === person.id).length > 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '16px' }}>
+                  {uploadedDocs.filter(d => d.memberId === person.id).map(doc => (
+                    <div key={doc.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 18px', background: '#FFFFFF', borderRadius: '8px', border: '1px solid #E2E8F0' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                        {doc.fileDataUrl ? (
+                          <img src={doc.fileDataUrl} alt="Preview" style={{ width: '40px', height: '40px', objectFit: 'cover', borderRadius: '6px', border: '1px solid #CBD5E1' }} />
+                        ) : (
+                          <FileText size={28} style={{ color: '#2563EB' }} />
+                        )}
+                        <div>
+                          <div style={{ fontWeight: 700, fontSize: '0.9rem', color: 'var(--text-main)' }}>{doc.fileName}</div>
+                          <div style={{ fontSize: '0.75rem', color: 'var(--text-sub)', marginTop: '2px' }}>
+                            Type: <strong>{doc.documentType}</strong> • {doc.fileSize}
+                          </div>
+                        </div>
+                      </div>
+                      <button onClick={() => removeDoc(doc.id)} style={{ background: 'none', border: 'none', color: '#EF4444', cursor: 'pointer' }}>
+                        <Trash2 size={18} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '24px' }}>
+            <button
+              className="btn-secondary"
+              onClick={() => {
+                setStepErrors({});
+                if (familyInfo.householdSize === 1) {
+                  setCurrentStep(3);
+                } else {
+                  setCurrentStep(4);
+                }
+              }}
+            >
+              <ArrowLeft size={18} /> {t('common.previous', 'Previous')}
+            </button>
+            <button className="btn-primary" onClick={() => { setStepErrors({}); setCurrentStep(6); }}>
+              {t('reg.nextEmergency', 'Next Step: Emergency Contact')} <ArrowRight size={18} />
+            </button>
+          </div>
+        </div>
+      )}
+
+      
+      {/* STEP 6: EMERGENCY CONTACT */}
+      {currentStep === 8 && (
         <div className="glass-card card-accent-blue animate-fade-in" style={{ padding: '32px' }}>
           <div style={{ marginBottom: '24px' }}>
             <h3 style={{ fontSize: '1.3rem', fontWeight: 800, color: 'var(--text-main)' }}>
@@ -2883,18 +3003,18 @@ export const RegistrationEngine: React.FC<Props> = ({ mode = 'customer', onCompl
           </div>
 
           <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '24px' }}>
-            <button className="btn-secondary" onClick={() => { setStepErrors({}); if (familyInfo.householdSize === 1) setCurrentStep(3); else setCurrentStep(4); }}>
+            <button className="btn-secondary" onClick={() => { setStepErrors({}); setCurrentStep(5); }}>
               <ArrowLeft size={18} /> {t('common.previous', 'Previous')}
             </button>
-            <button className="btn-primary" onClick={handleNextFromStep5}>
+            <button className="btn-primary" onClick={handleNextFromStep6}>
               {t('reg.nextDeclaration', 'Next Step: Declaration')} <ArrowRight size={18} />
             </button>
           </div>
         </div>
       )}
 
-      {/* STEP 6: DECLARATION */}
-      {currentStep === 6 && (
+      {/* STEP 7: DECLARATION */}
+      {currentStep === 8 && (
         <div className="glass-card card-accent-blue animate-fade-in" style={{ padding: '32px' }}>
           <div style={{ marginBottom: '24px' }}>
             <h3 style={{ fontSize: '1.3rem', fontWeight: 800, color: 'var(--text-main)' }}>
@@ -2941,7 +3061,7 @@ export const RegistrationEngine: React.FC<Props> = ({ mode = 'customer', onCompl
           </div>
 
           <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-            <button className="btn-secondary" onClick={() => setCurrentStep(5)} disabled={isSubmitting}>
+            <button className="btn-secondary" onClick={() => setCurrentStep(6)} disabled={isSubmitting}>
               <ArrowLeft size={18} /> {t('common.previous', 'Previous')}
             </button>
             <button className="btn-emerald" disabled={!declared || isSubmitting} onClick={handleFinalSubmit}>
@@ -2955,8 +3075,8 @@ export const RegistrationEngine: React.FC<Props> = ({ mode = 'customer', onCompl
         </div>
       )}
 
-      {/* STEP 7: COMPLETE CONFIRMATION */}
-      {currentStep === 7 && (
+      {/* STEP 8: COMPLETE CONFIRMATION */}
+      {currentStep === 8 && (
         <div className="glass-card card-accent-emerald animate-fade-in" style={{ padding: '48px 32px', textAlign: 'center' }}>
           <CheckCircle size={60} style={{ color: '#10B981', margin: '0 auto 20px auto' }} />
           <h2 style={{ fontSize: '2rem', fontWeight: 800, color: 'var(--text-main)', marginBottom: '8px' }}>
