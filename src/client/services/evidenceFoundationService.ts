@@ -109,9 +109,6 @@ export class EvidenceFoundationService {
           active: r.u_active === 'true' || r.u_active === true,
           notes: r.u_notes || '',
         }));
-      } else if (countryId) {
-        // Return empty array if no documents match this country / scope in ServiceNow
-        return [];
       } else {
         throw new Error('No country documents returned from ServiceNow');
       }
