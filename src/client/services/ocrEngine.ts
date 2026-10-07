@@ -1136,7 +1136,7 @@ export async function extractDocumentFields(
   const isFamilyDoc = expectedFields?.some(f =>
     f.name === 'family_members' ||
     (f.type && f.type.toLowerCase() === 'json')
-  );
+  ) || filename.includes('grama');
 
   let familyMembers;
   if (isFamilyDoc) {

@@ -118,7 +118,10 @@ export class EvidenceFoundationService {
 
     let docs = this.localDocuments;
     if (countryId) {
-      docs = docs.filter(d => d.countryId === countryId || d.countryName.toLowerCase() === countryId.toLowerCase());
+      const allCountries = await this.getCountries();
+      const matchedCountry = allCountries.find(c => c.id === countryId);
+      const nameToMatch = matchedCountry ? matchedCountry.countryName.toLowerCase() : countryId.toLowerCase();
+      docs = docs.filter(d => d.countryId === countryId || d.countryName.toLowerCase() === nameToMatch || d.countryId.toLowerCase() === nameToMatch);
     }
     if (registrationScope === 'family') {
       docs = docs.filter(d => d.registrationScope === 'family' || d.registrationScope === 'both');
